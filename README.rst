@@ -6,12 +6,13 @@ This repository provides tools for modeling Spitzer IRAC and MIPS images based o
 
 Requirements: 
 ~~~~~~~~~~~~~
-    .. code:: bash
+    .. code:: 
     
-       grizli
+       grizli (https://github.com/gbrammer/grizli)
+       skimage
        astropy
        drizzlepac
-       skimage
+       photutils
        ...
        
 Installation:
@@ -26,5 +27,6 @@ Usage:
 ~~~~~~
 See the examples in the `notebooks` subdirectory:
 
-IRAC-mosaic.ipynb - Generate drizzled IRAC mosaics and PSFs from individual Spitzer `BCD` exposure files.
+- `IRAC-mosaic.ipynb <https://github.com/gbrammer/golfir/blob/master/notebooks/IRAC-mosaic.ipynb>`__ - Generate drizzled IRAC mosaics and PSFs from individual Spitzer `BCD` exposure files.
+- `IRAC-photometry.ipynb <https://github.com/gbrammer/golfir/blob/master/notebooks/IRAC-photometry.ipynb>`__ - Extract Spitzer photometry using HST template images similar to Mophongo (Labb\'e et al.), T-PHOT (Merlin et al.), etc.
  
