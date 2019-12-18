@@ -14,7 +14,7 @@ import astropy.units as u
 
 from grizli import utils, prep
 
-def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, align_threshold=3, mips_ext='_bcd.fits'):
+def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True):
     """
     """
     import glob
@@ -42,7 +42,10 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
     else:
         inst_key = 'SPITZER_M*'+mips_ext
         output_label = channel.replace('ch', 'mips')
-        
+    
+    if use_xbcd:
+        inst_key = 'SPITZER*_xbcd.fits*'
+            
     aors = {}
     pop_list = []
     N = len(aor_ids)
@@ -106,7 +109,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 extra_mask = aors[aor].extra_mask
                 force_pedestal=True
                 
-            print(i, aor, aors[aor].N)
+            print(f'drizzle_simple (iter={iter_pass}): ', i, aor, aors[aor].N)
             aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, pixfrac=pixfrac, flat_background=flat_background, force_pedestal=force_pedestal, extra_mask=extra_mask)#'point')
         
         if 0:
@@ -151,19 +154,25 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
         
         if two_pass & (iter_pass == 0):
             print('#\n# Source mask for median background\n#\n')
-            bkg_params = {'bh': 16, 'bw': 16, 'fh': 3, 'fw': 3, 'pixel_scale': 0.5+1.5*(instrument == 'mips')}
             
-            apertures = np.logspace(np.log10(0.3), np.log10(12), 5)*u.arcsec
-            detect_params = prep.SEP_DETECT_PARAMS.copy()
+            if ref_seg is None:
+                bkg_params = {'bh': 16, 'bw': 16, 'fh': 3, 'fw': 3,
+                               'pixel_scale': 0.5+1.5*(instrument == 'mips')}
 
-            cat = prep.make_SEP_catalog(root=irac_root, threshold=1.5, 
+                apertures = np.logspace(np.log10(0.3), np.log10(12), 5)*u.arcsec
+                detect_params = prep.SEP_DETECT_PARAMS.copy()
+
+                cat = prep.make_SEP_catalog(root=irac_root, threshold=1.5, 
                             get_background=True, bkg_params=bkg_params, 
                             phot_apertures=apertures, aper_segmask=True,
                             column_case=str.lower, 
                             detection_params=detect_params, 
                             pixel_scale=driz_scale)
             
-            seg = pyfits.open('{0}_seg.fits'.format(irac_root))[0]
+                seg = pyfits.open('{0}_seg.fits'.format(irac_root))[0]
+            else:
+                seg = ref_seg
+                
             seg_wcs = pywcs.WCS(seg.header)
             seg_wcs.pscale = utils.get_wcs_pscale(seg_wcs)
             for i, aor in enumerate(aors):
@@ -172,9 +181,10 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 med = aors[aor].med2d[0]-aors[aor].pedestal[0]
                 aors[aor].extra_mask = (blot_seg > 0) #| (med < -0.05)
                 
-    for i, aor in enumerate(aors):
-        aors[aor].save_state(mips_ext=mips_ext, verbose=True)
-        aors[aor].tab = aors[aor].wcs_table()
+    if save_state:
+        for i, aor in enumerate(aors):
+            aors[aor].save_state(mips_ext=mips_ext, verbose=True)
+            aors[aor].tab = aors[aor].wcs_table()
         
     return aors
     
@@ -299,7 +309,9 @@ def get_bcd_psf(ra=0, dec=0, wcs=None, channel=1, dx=dx, dd=dp):
     psf_full = np.zeros((256+2*pad,256+2*pad))
     psf_full[xp[1]-12:xp[1]+13, xp[0]-12:xp[0]+13] += psf_x
     return psf_full[pad:-pad, pad:-pad]
-                                      
+         
+GAIA_SIZE = 10.
+                             
 class IracAOR():
     def __init__(self, files=[], nskip=2, name='empty', channel='ch1', use_brmsk=True, min_frametime=20, instrument='irac'):
         
@@ -320,7 +332,48 @@ class IracAOR():
             self.native_scale = 2.50
             
         self.read_files(use_brmsk=use_brmsk, min_frametime=min_frametime)
-                
+    
+    @staticmethod
+    def read_cbcd(file, instrument='irac', use_brmsk=True):
+        
+        if 'xbcd' in file:
+            _res = read_xbcd(file)
+            return _res
+        
+        im = pyfits.open(file)
+        hdu = im[0]
+        cbcd = im[0].data
+        cbunc = pyfits.open(file.replace('bcd.', 'bunc.'))[0].data
+        
+        if self.instrument == 'irac':
+            bimsk =pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data 
+        else:
+            bimsk = pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data
+        
+        brmsk = np.zeros(bimsk.shape, dtype=np.int16)
+        if use_brmsk:
+            rmsk_file =  file.replace('bcd.', 'brmsk.')
+            if os.path.exists(rmsk_file):
+                brmsk = pyfits.open(rmsk_file)[0].data     
+                    
+        wcs = pywcs.WCS(im[0].header)
+        wcs.pscale = utils.get_wcs_pscale(wcs)
+        
+        return hdu, cbcd, cbunc, bimsk, brmsk, wcs
+        
+    @staticmethod
+    def read_xbcd(file):
+        im = pyfits.open(file)
+        hdu = im['CBCD']
+        cbcd = im['CBCD'].data
+        cbunc = im['CBUNC'].data
+        bimsk = im['WCS'].data
+        
+        wcs = pywcs.WCS(im['WCS'].header)
+        wcs.pscale = utils.get_wcs_pscale(wcs)
+        
+        return hdu, cbcd, cbunc, bimsk, bimsk*1, wcs
+        
     def read_files(self, use_brmsk=True, min_frametime=20):
         
         self.hdu = [pyfits.open(file)[0] for file in self.files]
@@ -333,30 +386,54 @@ class IracAOR():
         self.N = len(self.files)
         if self.N == 0:
             return None
+        
+        self.cbcd = []
+        self.cbunc = []
+        self.bimsk = []
+        self.brmsk = []
+        self.wcs = []
+        
+        for file in self.files:
+            if '_xbcd' in file:
+                _res = self.read_xbcd(file)
+            else:
+                _res = self.read_cbcd(file, use_brmsk=True, 
+                                      instrument=self.instrument)   
             
-        self.cbcd = np.stack([im.data*1 for im in self.hdu])
+            self.cbcd.append(_res[1])
+            self.cbunc.append(_res[2])
+            self.bimsk.append(_res[3])
+            self.brmsk.append(_res[4])
+            self.wcs.append(_res[5])
+            
+        self.cbcd = np.stack(self.cbcd)
+        self.cbunc = np.stack(self.cbunc)
+        self.bimsk = np.stack(self.bimsk)
+        self.brmsk = np.stack(self.brmsk)
 
-        self.cbunc = np.stack([pyfits.open(file.replace('bcd.', 'bunc.'))[0].data for file in self.files])
-        if self.instrument == 'irac':
-            self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data for file in self.files])
-        else:
-            self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data for file in self.files])
-            
-        if use_brmsk:
-            try:
-                self.brmsk = np.zeros(self.bimsk.shape, dtype=np.int16)
-                for i, file in enumerate(self.files):
-                    rmsk_file =  file.replace('bcd.', 'brmsk.')
-                    if os.path.exists(rmsk_file):
-                        self.brmsk[i,:,:] = pyfits.open(rmsk_file)[0].data     
-            except:
-                self.brmsk = None
-        else:
-            self.brmsk = None
-            
-        self.wcs = [pywcs.WCS(im.header) for im in self.hdu]
-        for w in self.wcs:
-            w.pscale = utils.get_wcs_pscale(w)
+        # self.cbcd = np.stack([im.data*1 for im in self.hdu])
+        # 
+        # self.cbunc = np.stack([pyfits.open(file.replace('bcd.', 'bunc.'))[0].data for file in self.files])
+        # if self.instrument == 'irac':
+        #     self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data for file in self.files])
+        # else:
+        #     self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data for file in self.files])
+        #     
+        # if use_brmsk:
+        #     try:
+        #         self.brmsk = np.zeros(self.bimsk.shape, dtype=np.int16)
+        #         for i, file in enumerate(self.files):
+        #             rmsk_file =  file.replace('bcd.', 'brmsk.')
+        #             if os.path.exists(rmsk_file):
+        #                 self.brmsk[i,:,:] = pyfits.open(rmsk_file)[0].data     
+        #     except:
+        #         self.brmsk = None
+        # else:
+        #     self.brmsk = None
+        #     
+        # self.wcs = [pywcs.WCS(im.header) for im in self.hdu]
+        # for w in self.wcs:
+        #     w.pscale = utils.get_wcs_pscale(w)
         
         self.shifts = np.zeros((self.N, 2))
         self.rot = np.zeros(self.N)
@@ -713,7 +790,7 @@ class IracAOR():
         cat[clip].write('{0}-{1}.cat.fits'.format(self.name, self.label), overwrite=True)
         
         ra, dec = w.wcs.crval
-        radec_ext, ref_name = prep.get_radec_catalog(ra=ra, dec=dec, radius=10.0, product='{0}-{1}'.format(self.name, self.label), verbose=True, reference_catalogs=reference, use_self_catalog=False, date=self.hdu[0].header['MJD_OBS'], date_format='mjd')
+        radec_ext, ref_name = prep.get_radec_catalog(ra=ra, dec=dec, radius=GAIA_SIZE, product='{0}-{1}'.format(self.name, self.label), verbose=True, reference_catalogs=reference, use_self_catalog=False, date=self.hdu[0].header['MJD_OBS'], date_format='mjd')
         if radec is None:
             radec = radec_ext
             if assume_close > 0:
