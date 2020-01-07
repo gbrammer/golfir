@@ -345,7 +345,7 @@ class IracAOR():
         cbcd = im[0].data
         cbunc = pyfits.open(file.replace('bcd.', 'bunc.'))[0].data
         
-        if self.instrument == 'irac':
+        if instrument == 'irac':
             bimsk =pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data 
         else:
             bimsk = pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data
