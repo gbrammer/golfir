@@ -1096,6 +1096,142 @@ def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0
         pyfits.writeto(prod+'.fits'.format(aor, label), 
                        data=psf_sci, header=hdu.header, overwrite=True)
 
+def init_model_attr(model):
+    """
+    Initialize pscale attribute of a model object
+    """
+    if not hasattr(model, 'pscale'):
+        model.pscale = {}
+        for k in model.param_names:
+            model.pscale[k] = 1.
+    else:
+        for k in model.param_names:
+            if k not in model.pscale:
+                model.pscale[k] = 1.
+    
+    return model
+
+class ModelPSF(object):
+    """
+    PSF using `~astropy.modeling`
+    """
+    def __init__(self, model, input_scale=0.1, rmax=14, output_scale=0.1):
+        self.input_scale = input_scale
+        self.output_scale = output_scale
+        self.rmax = rmax
+        
+        init_model_attr(model)
+        self.model = model
+        self.initialize_output(rmax=rmax, output_scale=output_scale)
+        
+    def initialize_output(self, rmax=14, output_scale=0.1):
+        if hasattr(rmax, '__len__'):
+            xp = np.arange(-rmax[0], rmax[0],
+                           output_scale/self.input_scale)
+            yp = np.arange(-rmax[1], rmax[1],
+                           output_scale/self.input_scale)
+        else:
+            xp = np.arange(-rmax, rmax+1.e-7, output_scale/self.input_scale)
+            yp = xp
+        
+        self.rmax = rmax   
+        self._xp, self._yp = np.meshgrid(xp, yp)
+    
+    def evaluate_psf(self, scale=0.1, rmax=14, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
+        """
+        Dummy function to just evaluate the model
+        """
+        if (scale != self.output_scale) | (rmax != self.rmax):
+            self.initialize_output(rmax=rmax, output_scale=scale)
+        
+        model = self.model(self._xp, self._yp)
+        
+        if transform is not None:
+            model = warp_image(transform, model, warp_args=warp_args)
+        
+        model /= model.sum()
+        return model, None, None
+        
+    @property
+    def theta_index(self):
+        
+        idx = []
+        for i, p in enumerate(self.model.fixed):
+            if not self.model.fixed[p]:
+                idx.append(i)
+        
+        return np.array(idx)
+    
+    @property
+    def theta_labels(self):
+        
+        labels = []
+        for i, p in enumerate(self.model.fixed):
+            if not self.model.fixed[p]:
+                labels.append(p)
+        
+        return labels
+    
+    @property
+    def theta(self):
+        return np.array([self.model.parameters[i] for i in self.theta_index])
+    
+    def set_theta(self, theta):
+        for i, idx in enumerate(self.theta_index):
+            self.model.parameters[idx] = theta[i]
+            
+    @property
+    def theta_scale(self):
+        return np.array([self.model.pscale[p] for p in self.theta_labels])
+    
+    def __repr__(self):
+        return self.model.__repr__()
+            
+    @staticmethod    
+    def init_model(type='Moffat2D'):
+        from astropy.modeling.models import Moffat2D, Gaussian2D
+        if type == 'Moffat2D':
+            m = Moffat2D()
+            m.fixed['amplitude'] = 1.
+            init_model_attr(m)
+            m.pscale['alpha'] = 0.1
+        else:
+            m = Gaussian2D()
+            m.fixed['amplitude'] = 1.
+            init_model_attr(m)
+        
+        return m
+    
+    def fit_cutout(self, cutout, minimize_kwargs={'method':'powell'}):
+        from scipy.optimize import minimize
+        pixel_shape = cutout.shape[::-1]
+        
+        rmax = [p/2 for p in pixel_shape]
+        self.initialize_output(rmax=rmax, output_scale=self.input_scale)
+        
+        x0 = self.theta / self.theta_scale
+        
+        args = (self, cutout)
+        minimize(self._objective_function_psf, x0, args=args, **minimize_kwargs)
+        #minimize(_objective_function_psf, x0, args=args, **minimize_kwargs)
+        
+        model = self.evaluate_psf(rmax=self.rmax)
+        a = (model*cutout).sum()/(model**2).sum()
+        resid = cutout - model*a
+        
+    @staticmethod
+    def _objective_function_psf(theta_scl, psf, cutout):
+        
+        psf.set_theta(theta_scl*psf.theta_scale)
+        
+        model, _, _ = psf.evaluate_psf(rmax=psf.rmax)
+        a = (model*cutout).sum()/(model**2).sum()
+        resid = cutout - model*a
+        
+        chi2 = (resid**2).sum()
+        print(theta_scl*psf.theta_scale, chi2)
+        return chi2
+        
 class MipsPSF(object):
     def __init__(self, scale=0.1, rmax=14):
         import grizli
