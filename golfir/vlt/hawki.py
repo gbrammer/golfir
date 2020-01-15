@@ -25,6 +25,7 @@ def fetch(field='j234456m6406'):
     # Configure 'username' in ~/.astropy/config
     eso.login(reenter_password=True)
     
+    os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{field}_hawki.fits .')
     
     tab = utils.read_catalog(field+'_hawki.fits')
     
@@ -127,7 +128,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None):
             radec = 'a2744_ks_shallow.radec'
             seg_file = 'xa2744-test-ks_seg.fits'
             
-            radec = 'a2744-remask_wcs.radec'
+            #radec = 'a2744-remask_wcs.radec'
             seg_file = 'a2744-remask_seg.fits'
             
         elif 'alentino' in os.getcwd():
@@ -146,6 +147,8 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None):
         except:
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             utils.log_exception(LOGFILE, traceback)
+    
+def sync_results():
     
     # Zip and Sync to AWS
     field = os.getcwd().split('/')[-1]
@@ -329,35 +332,40 @@ def redrizzle_mosaics():
 
         #plt.scatter(cat['mag_auto'.lower()], cat['flux_radius'.lower()], alpha=0.2)
             
-        idx, dr = vista.match_to_catalog_sky(cat)
+        if len(vista) > 0:
+            idx, dr = vista.match_to_catalog_sky(cat)
         
-        try:
-            vkmag = vista[idx][kcol].filled()
-            vkmagerr = vista[idx][ekcol].filled()
-        except:
-            vkmag = vista[idx][kcol]
-            vkmagerr = vista[idx][ekcol]
+            try:
+                vkmag = vista[idx][kcol].filled()
+                vkmagerr = vista[idx][ekcol].filled()
+            except:
+                vkmag = vista[idx][kcol]
+                vkmagerr = vista[idx][ekcol]
             
-        mat = (dr.value < 0.5) & (vkmag > 12) & (vkmag < 22)
+            mat = (dr.value < 0.5) & (vkmag > 12) & (vkmag < 22)
         
-        mat &= np.isfinite(cat['mag_auto'])
+            mat &= np.isfinite(cat['mag_auto'])
         
-        # http://casu.ast.cam.ac.uk/surveys-projects/vista/technical/filter-set
+            # http://casu.ast.cam.ac.uk/surveys-projects/vista/technical/filter-set
         
-        dmag = cat['mag_auto'] - (vkmag + vega2ab)
-        mat &= np.isfinite(dmag) & (cat['flux_radius'] > 1) & (cat['mag_auto'] < 20) #& (vista[ekcol][idx].filled() < 0.2)
+            dmag = cat['mag_auto'] - (vkmag + vega2ab)
+            mat &= np.isfinite(dmag) & (cat['flux_radius'] > 1) & (cat['mag_auto'] < 20) #& (vista[ekcol][idx].filled() < 0.2)
         
-        try:
-            mat &= ~dmag.mask
-        except:
-            pass
+            try:
+                mat &= ~dmag.mask
+            except:
+                pass
         
-        if mat.sum() > 64:
-            limits = np.percentile(cat['mag_auto'][mat], [20, 40])
-            mat &= (cat['mag_auto'] > limits[0]) & (cat['mag_auto'] < limits[1])
+            if mat.sum() > 64:
+                limits = np.percentile(cat['mag_auto'][mat], [20, 40])
+                mat &= (cat['mag_auto'] > limits[0]) & (cat['mag_auto'] < limits[1])
             
-        med_dmag = np.median(dmag[mat])
-        mat &= np.abs(dmag - med_dmag) < 0.5
+            med_dmag = np.median(dmag[mat])
+            mat &= np.abs(dmag - med_dmag) < 0.5
+        
+        else:
+            mat = np.zeros(len(cat), dtype=bool)
+            
         if mat.sum() > 0:
             med_dmag = np.median(dmag[mat])
             is_calibrated = True

@@ -171,13 +171,14 @@ def hawki_query():
         dy = np.diff(ax.get_ylim())[0]*60
         
         fig.set_size_inches(xsize*np.clip(dx/dy, 0.2, 5)+px, xsize+py)
+        ax.set_xlim(ax.get_xlim()[::-1])
         overlaps.draw_axis_labels(ax=ax, nlabel=3)
         
         fig.tight_layout(pad=0.5)
         fig.savefig(f'{field}_hawki.png', dpi=120)
         plt.close('all')
         
-        if hawki_overlap.area > 0.0:
+        if (hawki_overlap.area > 0.0) & (not os.path.exists(f'{field}_hawki.fits')):
             
             print('Has overlap')
             kws = {}
