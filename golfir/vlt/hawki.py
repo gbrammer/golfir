@@ -28,7 +28,7 @@ def pipeline(field='j234456m6406', eso=None):
     if eso is None:
         eso = astroquery.eso.Eso()
         # Configure 'username' in ~/.astropy/config
-        eso.login(reenter_password=True)
+        eso.login() #reenter_password=True)
     
     os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{field}_hawki.fits .')
     
@@ -61,8 +61,19 @@ def pipeline(field='j234456m6406', eso=None):
     else:
         radec = None
         
-    hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
+    hawki.parse_and_run(extensions=[1,2,3,4], radec=None)
     
+    # Try to rerun the failed observations with the HST reference
+    failed = glob.glob('*failed')
+    if len(failed) > 0:
+        for fail in failed:
+            froot = fail.split('.failed')[0]
+            print(f'Clean {froot} failed')
+            os.system(f'rm *{froot}* Processed/{froot}*')
+        
+        radec = hawki.make_hst_radec(field, maglim=[16,22])
+        hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
+        
     hawki.redrizzle_mosaics()
     
     hawki.sync_results()
@@ -70,7 +81,9 @@ def pipeline(field='j234456m6406', eso=None):
     if os.path.exists(f'{field}-ks_drz_sci.fits.gz'):
         os.chdir('../')
         os.system(f'rm -rf {field}')
-
+    else:
+        print('Problem?')
+        
 def make_hst_radec(field, maglim=[16,22]):
     
     from grizli import prep
@@ -190,6 +203,9 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None):
             utils.log_exception(LOGFILE, traceback)
     
 def sync_results():
+    
+    # Remove old Failed files
+    os.system('aws s3 rm s3://grizli-v1/HAWKI/{field}/ --recursive --exclude "*" --include "*failed"')
     
     # Zip and Sync to AWS
     field = os.getcwd().split('/')[-1]
@@ -336,8 +352,22 @@ def redrizzle_mosaics():
         vista2 = prep.query_tap_catalog(db='"II/359/vhs_dr4"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND Kspmag > 10')
         if (len(vista2) > 0) & (len(vista2) > len(vista)):
             vista = vista2
-            
+    
+    vega2ab = 1.827
+    kcol = 'Kspmag'
+    ekcol = 'e_'+kcol
+    
+    if len(vista) == 0:
+        twom = prep.query_tap_catalog(db='"II/246/out"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND e_Kmag > 0 AND e_Kmag < 0.3')
+        if (len(twom) > 0) & (len(twom) > len(vista)):
+            vista = twom
+            kcol = 'Kmag'
+            ekcol = 'e_Kmag'
+                
     vista = utils.GTable(vista)
+    vista['ra'] = vista['RAJ2000']
+    vista['dec'] = vista['DEJ2000']
+
     vista.write('vista.fits', overwrite=True)
     #################
     
@@ -345,9 +375,6 @@ def redrizzle_mosaics():
     
     vista['ra'] = vista['RAJ2000']
     vista['dec'] = vista['DEJ2000']
-    vega2ab = 1.827
-    kcol = 'Kspmag'
-    ekcol = 'e_'+kcol
     prep.table_to_regions(vista, 'vista.reg')
     
     if False:
@@ -357,7 +384,13 @@ def redrizzle_mosaics():
         kcol = 'mag_auto'
         ekcol = 'magerr_auto'
     
+    stars = None
+    
     num = None
+    
+    fig = plt.figure(figsize=[10,6])
+    a1 = fig.add_subplot(121)
+    a2 = fig.add_subplot(122)
     
     for ix, xfile in enumerate(xfiles):
         froot = os.path.basename(xfile).split('.flat.masked.fits')[0]
@@ -398,7 +431,7 @@ def redrizzle_mosaics():
                 pass
         
             if mat.sum() > 64:
-                limits = np.percentile(cat['mag_auto'][mat], [20, 40])
+                limits = np.percentile(cat['mag_auto'][mat], [5, 20])
                 mat &= (cat['mag_auto'] > limits[0]) & (cat['mag_auto'] < limits[1])
             
             med_dmag = np.median(dmag[mat])
@@ -407,15 +440,13 @@ def redrizzle_mosaics():
         else:
             mat = np.zeros(len(cat), dtype=bool)
             
-        if mat.sum() > 0:
+        if mat.sum() > 2:
             med_dmag = np.median(dmag[mat])
             is_calibrated = True
             
-            plt.errorbar(cat['mag_auto'][mat] - med_dmag, dmag[mat], vista[ekcol][idx][mat],  alpha=0.1, linestyle='None', marker='None', color='k')
-            plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], zorder=1000, alpha=0.5)
-            #plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], c=cat['flag_aper_5'][mat], vmin=1, vmax=5, zorder=1000, alpha=0.5)
-            plt.ylim(med_dmag-1, med_dmag+1)
-            plt.grid()
+            a1.errorbar(cat['mag_auto'][mat] - med_dmag, dmag[mat], vista[ekcol][idx][mat],  alpha=0.1, linestyle='None', marker='None', color='k')
+            a1.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], zorder=1000, alpha=0.5)
+            a1.set_ylim(med_dmag-1, med_dmag+1)
                         
         else:
             med_dmag = 0 
@@ -428,23 +459,58 @@ def redrizzle_mosaics():
             
         phot_scl = 10**(0.4*med_dmag)
         
-        ZPi = 25+med_dmag
-        print(ix, '{0} scl={1:6.3f}, AB={2:6.2f} ({3})'.format(xfile.split('.flat')[0], phot_scl, ZPi, mat.sum()))
-        
+        ZPi = 25+med_dmag        
         ZP = 26
         zp26 = 10**(-0.4*(25-ZP)) # 26
         
+        # Image quality
+        if stars is not None:
+            sidx, sdr = stars.match_to_catalog_sky(cat)
+            smat = sdr.value < 0.1
+            flux_ratio = (cat['flux_aper_0']/cat['flux_aper_6'])
+            smat *= np.isfinite(flux_ratio) & (flux_ratio > 0) & (flux_ratio < 1)
+            a2.scatter(cat['mag_auto'][smat] - med_dmag, flux_ratio[smat])
+            med_ratio = np.median(flux_ratio[smat])
+            ellip = 1 - cat['b_image']/cat['a_image'] 
+            med_ellip = np.median(ellip[smat])
+            
+            if smat.sum() == 0:
+                med_ratio = -1
+                med_ellip = -1
+                
+        else:
+            med_ratio = -1
+            med_ellip = -1
+
+        ### Weight scaling for transparency
+        wht_scl = (0.1/phot_scl)**2
+
+        ### Weight scaling for image quality        
+        if med_ratio > 0:
+            wht_scl *= (med_ratio/0.6)**2
+        
+        ### Weight scaling for ellipticity
+        if med_ellip > 0:
+            wht_scl *= np.sqrt(1-med_ellip**2)
+            
+        print(ix, '{0} scl={1:6.3f}, AB={2:6.2f} ({3}) flux_ratio  = {4:.2f}, ellip = {5:.2f}, WHT = {6:.2f}'.format(xfile.split('.flat')[0], phot_scl, ZPi, mat.sum(), med_ratio, med_ellip, wht_scl))
+
         xsci = pyfits.open(f'{out_root}_drz_sci.fits', mode='update')
         xsci[0].header['CALZP'] = ZPi, 'Calibrated AB ZP from VISTA'
         xsci[0].header['PHOT_SCL'] = phot_scl, 'Flux scaling to AB'
         xsci[0].header['NCAL'] = mat.sum(), 'Number of sources for calibration'
         xsci[0].header['CALDB'] = vista.meta['TAPDB'][0], 'Table of reference sources'
-        xsci[0].header['IS_CALIB'] = is_calibrated, 'Magnitudes are calibrated from Vista'
+        xsci[0].header['IS_CALIB'] = is_calibrated, 'Magnitudes are calibrated from Vista'    
+        xsci[0].header['FRATIO'] = med_ratio, 'Aperture ratio as image quality'    
+        xsci[0].header['ELLIP'] = med_ellip, 'Stellar ellipticity'    
         
+        xsci[0].header['WHTSCL'] = wht_scl, 'Scale factor applied to weights'
+            
         xsci.flush()
-        
+                
+        # Apply to images
         sci[0].data *= phot_scl*zp26
-        wht *= 1./(phot_scl*zp26)**2
+        wht *= 1./(phot_scl*zp26)**2*wht_scl
         
         if num is None:
             num = sci[0].data*wht
@@ -455,6 +521,15 @@ def redrizzle_mosaics():
             den += wht
             header['NDRIZIM'] += sci[0].header['NDRIZIM']
     
+    a1.set_xlabel('mag_auto')
+    a1.set_xlim(15, 20)
+    a2.set_ylabel('delta mag')
+    a2.set_ylim(0, 1)
+    a2.set_xlim(a1.get_xlim())
+    a2.set_xlabel('mag_auto')
+    a1.grid(); a2.grid()
+    fig.tight_layout(pad=0.2)
+    
     sci = num/den
     sci[den == 0] = 0
     
@@ -463,9 +538,25 @@ def redrizzle_mosaics():
     header['FILTER'] = 'Ks'
     header['INSTRUME'] = 'HAWKI'
     
+    # Full catalog
     pyfits.writeto(root+'_drz_sci.fits', data=sci, header=header, overwrite=True)
     pyfits.writeto(root+'_drz_wht.fits', data=den, header=header, overwrite=True)
-        
+    
+    if False:
+        bkg_params={'bw': 128, 'bh': 128, 'fw': 3, 'fh': 3, 'pixel_scale':0.1}
+    
+        cat = prep.make_SEP_catalog(root, threshold=1.2, column_case=str.lower, bkg_params=bkg_params)
+    
+        # Masked background
+        seg = pyfits.open('{0}_seg.fits'.format(root))
+        seg_mask = seg[0].data > 0
+    
+        cat = prep.make_SEP_catalog(root, threshold=1.2, column_case=str.lower, bkg_params=bkg_params, bkg_mask=seg_mask)
+     
+        # Point sources
+        stars = (cat['mag_auto'] < 21.5) & (cat['mag_auto'] > 16) & (cat['flux_radius'] < 3.2) & (cat['flux_radius'] > 2)
+        cat['ra', 'dec', 'mag_auto'][stars].write('a2744_stars.fits')
+    
 def make_mosaic():
     
     if 0:
