@@ -2,13 +2,14 @@ import os
 import glob
 import numpy as np
 from grizli import utils
-from research.grizli import irac
 from imp import reload
 import matplotlib.pyplot as plt
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 import drizzlepac
+
+from . import irac
 
 # try:
 #     import grizli.ds9
