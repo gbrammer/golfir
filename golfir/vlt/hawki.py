@@ -438,7 +438,7 @@ def redrizzle_mosaics():
         xsci[0].header['CALZP'] = ZPi, 'Calibrated AB ZP from VISTA'
         xsci[0].header['PHOT_SCL'] = phot_scl, 'Flux scaling to AB'
         xsci[0].header['NCAL'] = mat.sum(), 'Number of sources for calibration'
-        xsci[0].header['CALDB'] = vista.meta['TAPDB'], 'Table of reference sources'
+        xsci[0].header['CALDB'] = vista.meta['TAPDB'][0], 'Table of reference sources'
         xsci[0].header['IS_CALIB'] = is_calibrated, 'Magnitudes are calibrated from Vista'
         
         xsci.flush()
