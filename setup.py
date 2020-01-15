@@ -51,12 +51,12 @@ setup(
     license = "MIT",
     url = "https://github.com/gbrammer/golfir",
     download_url = "https://github.com/gbrammer/golfir/tarball/{0}".format(version),
-    packages=['golfir'],
+    packages=['golfir', 'golfir/vlt'],
     classifiers=[
         "Development Status :: 1 - Planning",
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering :: Astronomy',
     ],
     install_requires=install_requires,
-    package_data={'golfir': []},
+    package_data={'golfir': ['data/*header']},
 )
