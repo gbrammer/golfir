@@ -17,13 +17,18 @@ import grizli.ds9
 
 import traceback
 
-def fetch(field='j234456m6406'):
-    import astroquery.eso
+import astroquery.eso
+eso = astroquery.eso.Eso()
+if False:
+    eso.login(reenter_password=True)
+
+def pipeline(field='j234456m6406', eso=None):
     from golfir.vlt import hawki
 
-    eso = astroquery.eso.Eso()
-    # Configure 'username' in ~/.astropy/config
-    eso.login(reenter_password=True)
+    if eso is None:
+        eso = astroquery.eso.Eso()
+        # Configure 'username' in ~/.astropy/config
+        eso.login(reenter_password=True)
     
     os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{field}_hawki.fits .')
     
@@ -34,7 +39,9 @@ def fetch(field='j234456m6406'):
         print(dir)
         if not os.path.exists(dir):
             os.mkdir(dir)
-            
+    
+    print(f'{field}: fetch {len(tab)} files')       
+     
     data_files = eso.retrieve_data(tab['DP.ID'], destination=dirs[1])
     
     os.chdir(dirs[1])
@@ -47,13 +54,46 @@ def fetch(field='j234456m6406'):
     
     os.chdir('../')
     
-    os.system(f'wget "https://s3.amazonaws.com/grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz"')  
+    os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz .')  
     
-    hawki.parse_and_run(extensions=[1,2,3,4])
+    if False:
+        radec = hawki.make_hst_radec(field, maglim=[16,22])
+    else:
+        radec = None
+        
+    hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
+    
     hawki.redrizzle_mosaics()
     
+    hawki.sync_results()
     
-def parse_and_run(extensions=[2], SKIP=True, stop=None):
+    if os.path.exists(f'{field}-ks_drz_sci.fits.gz'):
+        os.chdir('../')
+        os.system(f'rm -rf {field}')
+
+def make_hst_radec(field, maglim=[16,22]):
+    
+    from grizli import prep
+    
+    phot_file = f'{field}_phot.fits'
+    
+    if not os.path.exists(phot_file):
+        os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}_phot.fits .')  
+    
+    phot = utils.read_catalog(phot_file)
+    sel = (phot['mag_auto'] > maglim[0]) & (phot['mag_auto'] < maglim[1])
+    
+    radec_file = f'{field}_{maglim[0]:4.1f}_{maglim[1]:4.1f}.radec'
+    
+    print(f'make_hst_radec: {radec_file} {sel.sum()}')
+    
+    prep.table_to_radec(phot[sel], radec_file)
+    prep.table_to_regions(phot[sel], radec_file.replace('.radec', '.reg'))
+    
+    return radec_file
+    
+    
+def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None):
     
     from golfir.vlt import hawki
     
@@ -94,9 +134,10 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None):
     except:
         # Run it
         extensions = [2]
-        SKIP=True
-        stop=None
-
+        SKIP = True
+        stop = None
+        radec = None
+        
     # Groups
     group_dict = {}
     for i, sci_files in enumerate(file_groups):
@@ -135,7 +176,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None):
             radec = 'hsc_21.radec'
             seg_file = -1
         else:
-            radec = None # GAIA DR2
+            #radec = None # GAIA DR2
             seg_file = -1
             
         try:
