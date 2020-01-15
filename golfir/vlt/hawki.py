@@ -169,6 +169,8 @@ def redrizzle_mosaics():
         ref_header, ref_wcs = utils.make_maximal_wcs([ref_wcs], pixel_scale=0.1, theta=0, pad=60, get_hdu=False, verbose=True)
     
     xfiles = glob.glob('*.flat.masked.fits')
+    xfiles.sort()
+    
     for xfile in xfiles:
         froot = os.path.basename(xfile).split('.flat.masked.fits')[0]
         ext_i = int(froot[-1])
@@ -1170,6 +1172,6 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         for k in ['DET DIT', 'DET NDIT', 'TPL NEXP', 'TPL EXPNO', 'OBS ID', 'OBS TARG NAME']: 
             out_header[hkey+k] = primary_headers[i][hkey+k]
                 
-        pyfits.writeto('Processed/{0}.sci.fits'.format(out_root), data=sci_list[i].reshape(sh), header=out_header, overwrite=True)
+        pyfits.writeto('Processed/{0}.sci.fits'.format(out_root), data=sci_list[i].reshape(sh).astype(np.float32), header=out_header, overwrite=True)
     
     
