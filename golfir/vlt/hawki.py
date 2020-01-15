@@ -234,17 +234,18 @@ def redrizzle_mosaics():
         cat = prep.make_SEP_catalog(out_root, threshold=1.4, column_case=str.lower, bkg_params=bkg_params, bkg_mask=seg_mask)
         
     # Combined    
-    # query vizier
+    # query vizier for VISTA surveys
     ra, dec = ref_wcs.wcs.crval
-
     try:
-        vista = prep.query_tap_catalog(db='II/343/viking2', ra=ra, dec=dec, radius=12, vizier=True)
+        vista = prep.query_tap_catalog(db='"II/343/viking2"', ra=ra, dec=dec, radius=12, vizier=True)
     except:
         vista = prep.query_tap_catalog(db='"II/359/vhs_dr4"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND Kspmag > 10')
     
     vista = utils.GTable(vista)
-        
-    vista = utils.read_catalog('viking.fits')
+    vista.write('vista.fits', overwrite=True)
+    #################
+    
+    vista = utils.read_catalog('vista.fits')
     
     vista['ra'] = vista['RAJ2000']
     vista['dec'] = vista['DEJ2000']
@@ -253,11 +254,12 @@ def redrizzle_mosaics():
     ekcol = 'e_'+kcol
     prep.table_to_regions(vista, 'vista.reg')
     
-    # Use Full K as reference
-    vista = utils.read_catalog('a2744-remask.cat.fits')
-    vega2ab = 0
-    kcol = 'mag_auto'
-    ekcol = 'magerr_auto'
+    if False:
+        # Use Full K as reference
+        vista = utils.read_catalog('a2744-remask.cat.fits')
+        vega2ab = 0
+        kcol = 'mag_auto'
+        ekcol = 'magerr_auto'
     
     num = None
     
