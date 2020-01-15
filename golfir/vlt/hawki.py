@@ -19,9 +19,11 @@ import traceback
 
 def fetch(field='j234456m6406'):
     import astroquery.eso
+    from golfir.vlt import hawki
+
     eso = astroquery.eso.Eso()
     # Configure 'username' in ~/.astropy/config
-    eso.login()
+    eso.login(reenter_password=True)
     
     
     tab = utils.read_catalog(field+'_hawki.fits')
@@ -42,16 +44,24 @@ def fetch(field='j234456m6406'):
         print(file)
         os.system('gunzip '+file)
     
-    os.system(f'wget "https://s3.amazonaws.com/grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz')  
+    os.chdir('../')
+    
+    os.system(f'wget "https://s3.amazonaws.com/grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz"')  
+    
+    hawki.parse_and_run(extensions=[1,2,3,4])
+    hawki.redrizzle_mosaics()
+    
     
 def parse_and_run(extensions=[2], SKIP=True, stop=None):
     
     from golfir.vlt import hawki
     
     if not os.path.exists('libralato_hawki_chip1.crpix.header'):
-        path = os.path.join(os.path.dirname(hawki.__file__), '../../data/')
+        path = os.path.join(os.path.dirname(hawki.__file__), '../data')
         os.system(f'cp {path}/libra* .')
-        
+    
+    os.system('aws s3 sync s3://grizli-v1/HAWKI/Calibs/ RAW/')
+    
     if not os.path.exists('files.list'):        
         os.system('dfits RAW/HAWKI*fits | fitsort OBS.ID DATE-OBS TPL.NEXP TPL.EXPNO | sed "s/FILE/# FILE/" > files.list')
     
@@ -136,7 +146,44 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None):
         except:
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             utils.log_exception(LOGFILE, traceback)
+    
+    # Zip and Sync to AWS
+    field = os.getcwd().split('/')[-1]
 
+    files = glob.glob(f'{field}-ks_drz*')    
+    files += glob.glob('*flat.masked.fits')
+    files += glob.glob('ob*_drz*fits')
+    files += glob.glob('Processed/*sci.fits')
+    
+    for file in files:
+        print(f'gzip {file}')
+        os.system(f'gzip {file}')
+        
+    fp = open(f'{field}_hawki.html','w')
+    fp.write(f'<h4>{field} - {time.ctime()}</h4>\n')
+    fp.write(f'HST: <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{field}/Prep/{field}.summary.html">{field}</a><br>\n')
+
+    fp.write(f'<img src="https://s3.amazonaws.com/grizli-v1/HAWKI/{field}_hawki.png" height=300px><br>\n')
+    fp.write(f'<a href="https://s3.amazonaws.com/grizli-v1/HAWKI/{field}_hawki.fits">{field}_hawki.fits</a><br><p>\n')
+    
+    fp.write('<pre>\n')
+    
+    cmd = f'aws s3 sync ./ s3://grizli-v1/HAWKI/{field}/ --acl public-read --exclude "*" --include "*html"'
+    
+    for group in [f'{field}-ks_drz*gz', '*flat.masked.fits.gz', 'ob*_drz*fits.gz', 'ob*[1-4].log.txt', 'ob*failed', 'ob*[1-4]*wcs.*', 'Processed/*', 'vista.fits', '*gaia*']:
+        files = glob.glob(group)
+        files.sort()
+        
+        for file in files:
+            fp.write(f'<a href="{file}">{file}</a>\n')
+        
+        fp.write('\n')
+        cmd += f' --include "{group}"'
+    
+    fp.write('</pre>')
+    fp.close()
+    os.system(cmd) 
+    
 def flat_gradient():
     """
     Average gradient in the chip flats
@@ -150,6 +197,7 @@ def flat_gradient():
         pyfits.writeto('flat_gradient-{0}.fits'.format(ext), data=f, overwrite=True)
         
 def redrizzle_mosaics():
+    
     if 'Process2020' in os.getcwd():
         ref_image = 'hff-j001408m3023-f160w_drz_sci.fits.gz'
         root = 'a2744-test'
@@ -238,11 +286,13 @@ def redrizzle_mosaics():
     # Combined    
     # query vizier for VISTA surveys
     ra, dec = ref_wcs.wcs.crval
-    try:
-        vista = prep.query_tap_catalog(db='"II/343/viking2"', ra=ra, dec=dec, radius=12, vizier=True)
-    except:
-        vista = prep.query_tap_catalog(db='"II/359/vhs_dr4"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND Kspmag > 10')
-    
+
+    vista = prep.query_tap_catalog(db='"II/343/viking2"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND Kspmag > 10')
+    if len(vista) < 10:
+        vista2 = prep.query_tap_catalog(db='"II/359/vhs_dr4"', ra=ra, dec=dec, radius=12, vizier=True, extra='AND Kspmag > 10')
+        if (len(vista2) > 0) & (len(vista2) > len(vista)):
+            vista = vista2
+            
     vista = utils.GTable(vista)
     vista.write('vista.fits', overwrite=True)
     #################
@@ -265,7 +315,7 @@ def redrizzle_mosaics():
     
     num = None
     
-    for xfile in xfiles:
+    for ix, xfile in enumerate(xfiles):
         froot = os.path.basename(xfile).split('.flat.masked.fits')[0]
         ext_i = int(froot[-1])
         ob_root = froot[:-2]
@@ -280,33 +330,69 @@ def redrizzle_mosaics():
         #plt.scatter(cat['mag_auto'.lower()], cat['flux_radius'.lower()], alpha=0.2)
             
         idx, dr = vista.match_to_catalog_sky(cat)
-        mat = (dr.value < 0.5) & (vista[idx][kcol] > 12) & (vista[idx][kcol] < 22)
+        
+        try:
+            vkmag = vista[idx][kcol].filled()
+            vkmagerr = vista[idx][ekcol].filled()
+        except:
+            vkmag = vista[idx][kcol]
+            vkmagerr = vista[idx][ekcol]
+            
+        mat = (dr.value < 0.5) & (vkmag > 12) & (vkmag < 22)
+        
+        mat &= np.isfinite(cat['mag_auto'])
         
         # http://casu.ast.cam.ac.uk/surveys-projects/vista/technical/filter-set
-
-        dmag = cat['mag_auto'] - (vista[kcol][idx] + vega2ab)
-        mat &= np.isfinite(dmag) & (cat['flux_radius'] < 5) & (cat['mag_auto'] < 20) & (vista[ekcol][idx] < 0.2)
         
+        dmag = cat['mag_auto'] - (vkmag + vega2ab)
+        mat &= np.isfinite(dmag) & (cat['flux_radius'] > 1) & (cat['mag_auto'] < 20) #& (vista[ekcol][idx].filled() < 0.2)
+        
+        try:
+            mat &= ~dmag.mask
+        except:
+            pass
+        
+        if mat.sum() > 64:
+            limits = np.percentile(cat['mag_auto'][mat], [20, 40])
+            mat &= (cat['mag_auto'] > limits[0]) & (cat['mag_auto'] < limits[1])
+            
         med_dmag = np.median(dmag[mat])
         mat &= np.abs(dmag - med_dmag) < 0.5
-        if mat.sum() == 0:
-            continue
+        if mat.sum() > 0:
+            med_dmag = np.median(dmag[mat])
+            is_calibrated = True
             
-        plt.errorbar(cat['mag_auto'][mat] - med_dmag, dmag[mat], vista[ekcol][idx][mat],  alpha=0.1, linestyle='None', marker='None', color='k')
-        plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], zorder=1000, alpha=0.5)
-        #plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], c=cat['flag_aper_5'][mat], vmin=1, vmax=5, zorder=1000, alpha=0.5)
-        plt.ylim(med_dmag-1, med_dmag+1)
-        plt.grid()
-                
+            plt.errorbar(cat['mag_auto'][mat] - med_dmag, dmag[mat], vista[ekcol][idx][mat],  alpha=0.1, linestyle='None', marker='None', color='k')
+            plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], zorder=1000, alpha=0.5)
+            #plt.scatter(cat['mag_auto'][mat] - med_dmag, dmag[mat], c=cat['flag_aper_5'][mat], vmin=1, vmax=5, zorder=1000, alpha=0.5)
+            plt.ylim(med_dmag-1, med_dmag+1)
+            plt.grid()
+                        
+        else:
+            med_dmag = 0 
+            is_calibrated = False
+            ref_mag = {1:22.398, 2:22.633, 3:22.6609, 4:22.409}
+            med_dmag = ref_mag[ext_i] - 25
+        
         sci = pyfits.open(f'{out_root}_drz_sci.fits')
         wht = pyfits.open(f'{out_root}_drz_wht.fits')[0].data
-        
+            
         phot_scl = 10**(0.4*med_dmag)
+        
         ZPi = 25+med_dmag
-        print('{0} scl={1:6.3f}, Vega={2:6.2f}'.format(xfile.split('.flat')[0], phot_scl, ZPi+1.826))
+        print(ix, '{0} scl={1:6.3f}, AB={2:6.2f} ({3})'.format(xfile.split('.flat')[0], phot_scl, ZPi, mat.sum()))
         
         ZP = 26
         zp26 = 10**(-0.4*(25-ZP)) # 26
+        
+        xsci = pyfits.open(f'{out_root}_drz_sci.fits', mode='update')
+        xsci[0].header['CALZP'] = ZPi, 'Calibrated AB ZP from VISTA'
+        xsci[0].header['PHOT_SCL'] = phot_scl, 'Flux scaling to AB'
+        xsci[0].header['NCAL'] = mat.sum(), 'Number of sources for calibration'
+        xsci[0].header['CALDB'] = vista.meta['TAPDB'], 'Table of reference sources'
+        xsci[0].header['IS_CALIB'] = is_calibrated, 'Magnitudes are calibrated from Vista'
+        
+        xsci.flush()
         
         sci[0].data *= phot_scl*zp26
         wht *= 1./(phot_scl*zp26)**2
@@ -328,8 +414,8 @@ def redrizzle_mosaics():
     header['FILTER'] = 'Ks'
     header['INSTRUME'] = 'HAWKI'
     
-    pyfits.writeto('test_drz_sci.fits', data=sci, header=header, overwrite=True)
-    pyfits.writeto('test_drz_wht.fits', data=den, header=header, overwrite=True)
+    pyfits.writeto(root+'_drz_sci.fits', data=sci, header=header, overwrite=True)
+    pyfits.writeto(root+'_drz_wht.fits', data=den, header=header, overwrite=True)
         
 def make_mosaic():
     
