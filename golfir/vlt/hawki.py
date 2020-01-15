@@ -202,7 +202,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None):
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             utils.log_exception(LOGFILE, traceback)
     
-def sync_results():
+def sync_results(include_exposures=False):
     
     # Remove old Failed files
     os.system('aws s3 rm s3://grizli-v1/HAWKI/{field}/ --recursive --exclude "*" --include "*failed"')
@@ -213,7 +213,8 @@ def sync_results():
     files = glob.glob(f'{field}-ks_drz*')    
     files += glob.glob('*flat.masked.fits')
     files += glob.glob('ob*_drz*fits')
-    files += glob.glob('Processed/*sci.fits')
+    if include_exposures:
+        files += glob.glob('Processed/*sci.fits')
     
     for file in files:
         print(f'gzip {file}')
@@ -230,10 +231,15 @@ def sync_results():
     
     cmd = f'aws s3 sync ./ s3://grizli-v1/HAWKI/{field}/ --acl public-read --exclude "*" --include "*html"'
     
-    for group in [f'{field}-ks_drz*gz', '*flat.masked.fits.gz', 'ob*_drz*fits.gz', 'ob*[1-4].log.txt', 'ob*failed', 'ob*[1-4]*wcs.*', 'Processed/*', 'vista.fits', '*gaia*']:
+    os.system(f'dfits Processed/*fits | fitsort  CRVAL1 CRVAL2 CRPIX1 CRPIX2 CD1_1 CD1_2 CD2_1 CD2_2 BKGORDER BKG001 BKG002 BKG003 BKG003 BKG004 BKG005 BKG006 BKG007 BKG008 BKG009 ORIGFILE DET.NDIT DET.DIT TPL.NEXP TPL.EXPNO OBS.ID > {field}.exposures.txt')
+    
+    for group in [f'{field}-ks_drz*gz', '*flat.masked.fits.gz', '*files',  'ob*_drz*fits.gz', 'ob*[1-4].log', '*exposures.txt', 'ob*failed', 'ob*[1-4]*wcs.*', 'Processed/*gz', 'vista.fits', '*gaia*']:
         files = glob.glob(group)
         files.sort()
         
+        if len(files) == 0:
+            continue
+            
         for file in files:
             fp.write(f'<a href="{file}">{file}</a>\n')
         
