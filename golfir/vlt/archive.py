@@ -11,7 +11,7 @@ def hawki_query():
     
     kwargs = {}
     kwargs['column_filters'] = {}
-    kwargs['column_filters']['tpl_nexp'] = ['> 10']
+    kwargs['column_filters']['tpl_nexp'] = ['> 5']
     kwargs['column_filters']['tpl_expno'] = [1]
     kwargs['column_filters']['ins_filt1_name'] = ['Ks']
     kwargs['column_filters']['dp_cat'] = ['SCIENCE']
@@ -69,7 +69,8 @@ def hawki_query():
             
         field = ch['field_root'][i]
 
-        tab = utils.read_catalog(f'../FieldsSummary/{field}_footprint.fits')
+        #tab = utils.read_catalog(f'../FieldsSummary/{field}_footprint.fits')
+        tab = utils.read_catalog(f'{field}_footprint.fits')
         meta = tab.meta
         
         xr = (meta['XMIN'], meta['XMAX'])
@@ -87,7 +88,11 @@ def hawki_query():
         p_ir = None
         
         for j, fph in enumerate(tab['footprint']):
-            for p in query.parse_polygons(fph):
+            ps, is_bad, poly = query.instrument_polygon(tab[j])
+            if not hasattr(ps, '__len__'):
+                ps = [ps]
+                
+            for p in ps:
                 p_j = Polygon(p).buffer(0.001)
                 if p_hst is None:
                     p_hst = p_j
@@ -99,6 +104,7 @@ def hawki_query():
                         p_ir = p_j
                     else:
                         p_ir = p_ir.union(p_j)
+                        
         ##############################            
         fig = plt.figure(figsize=[6,6])
         
@@ -180,7 +186,6 @@ def hawki_query():
         
         if (hawki_overlap.area > 0.0) & (not os.path.exists(f'{field}_hawki.fits')):
             
-            print('Has overlap')
             kws = {}
             for k in kwargs:
                 kws[k] = kwargs[k].copy()

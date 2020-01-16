@@ -20,9 +20,29 @@ import traceback
 import astroquery.eso
 eso = astroquery.eso.Eso()
 if False:
-    eso.login(reenter_password=True)
+    eso.login() #reenter_password=True)
 
-def pipeline(field='j234456m6406', eso=None):
+def runit(field='', eso=None):
+    
+    from golfir.vlt import hawki
+    
+    if field.startswith('hff-'):
+        # Run in two steps for global masking
+        pass
+    else:
+        pass
+    
+    hawki.pipeline(field=field, eso=eso, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4])
+        
+    hawki.sync_results()
+    
+    if os.path.exists(f'{field}-ks_drz_sci.fits.gz'):
+        os.chdir('../')
+        os.system(f'rm -rf {field}')
+    else:
+        print('Problem?')
+        
+def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4]):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -34,15 +54,30 @@ def pipeline(field='j234456m6406', eso=None):
     
     tab = utils.read_catalog(field+'_hawki.fits')
     
+    if ob_indices is None:
+        datasets = tab['DP.ID']
+    else:
+        ob_start = np.where(tab['TPL EXPNO'] == 1)[0]
+        ob_end = np.roll(ob_start, -1)
+        ob_end[-1] = len(tab)
+        ob_nexp = ob_end - ob_start
+
+        datasets = []
+        for ind in ob_indices:
+            sl = slice(ob_start[ind], ob_end[ind])
+            datasets.extend(list(tab['DP.ID'][sl]))
+            
     dirs = [field, os.path.join(field, 'RAW'), os.path.join(field, 'Processed')]
     for dir in dirs:
         print(dir)
         if not os.path.exists(dir):
             os.mkdir(dir)
     
-    print(f'{field}: fetch {len(tab)} files')       
-     
-    data_files = eso.retrieve_data(tab['DP.ID'], destination=dirs[1])
+    print(f'{field}: fetch {len(datasets)} files (ob_indices={ob_indices})')       
+    
+    request_id = None # Restart an earlier request
+    
+    data_files = eso.retrieve_data(datasets, destination=dirs[1], continuation=True, request_id=request_id)
     
     os.chdir(dirs[1])
     files = glob.glob('*.Z')
@@ -56,12 +91,12 @@ def pipeline(field='j234456m6406', eso=None):
     
     os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz .')  
     
-    if False:
+    if use_hst_radec:
         radec = hawki.make_hst_radec(field, maglim=[16,22])
     else:
         radec = None
         
-    hawki.parse_and_run(extensions=[1,2,3,4], radec=None)
+    hawki.parse_and_run(extensions=extensions, radec=radec)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
@@ -73,16 +108,11 @@ def pipeline(field='j234456m6406', eso=None):
         
         radec = hawki.make_hst_radec(field, maglim=[16,22])
         hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
-        
+    
+    from importlib import reload
+    reload(hawki)     
     hawki.redrizzle_mosaics()
     
-    hawki.sync_results()
-    
-    if os.path.exists(f'{field}-ks_drz_sci.fits.gz'):
-        os.chdir('../')
-        os.system(f'rm -rf {field}')
-    else:
-        print('Problem?')
         
 def make_hst_radec(field, maglim=[16,22]):
     
@@ -106,7 +136,7 @@ def make_hst_radec(field, maglim=[16,22]):
     return radec_file
     
     
-def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None):
+def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='None', assume_close=10):
     
     from golfir.vlt import hawki
     
@@ -187,13 +217,14 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None):
             
         elif 'alentino' in os.getcwd():
             radec = 'hsc_21.radec'
-            seg_file = -1
+            seg_file = 'None'
         else:
             #radec = None # GAIA DR2
-            seg_file = -1
+            pass
+            #seg_file = 'None'
             
         try:
-            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=10, radec=radec, stop=stop, seg_file=seg_file, max_shift=100, max_rot=3, max_scale=0.02)
+            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=100, max_rot=3, max_scale=0.02)
 
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             if os.path.exists(LOGFILE):
@@ -733,7 +764,7 @@ def get_ob_root(h0):
     return ob_root
     
     
-def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file=-1, max_shift=100, max_rot=3, max_scale=0.02):
+def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02):
     """
     Reduce a HAWKI chip
     """
@@ -1217,7 +1248,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
             ################
             # Segmentation mask
             if seg_file is not None:
-                if seg_file in [-1]:
+                if seg_file in [-1, 'None', 'none', 'NONE']:
                     seg_file = '{0}-{1}-ks_seg.fits'.format(ob_root, ext)
                     
                 seg = pyfits.open(seg_file)
