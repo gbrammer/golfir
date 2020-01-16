@@ -136,7 +136,7 @@ def make_hst_radec(field, maglim=[16,22]):
     return radec_file
     
     
-def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='None', assume_close=10):
+def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02):
     
     from golfir.vlt import hawki
     
@@ -224,7 +224,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='No
             #seg_file = 'None'
             
         try:
-            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=100, max_rot=3, max_scale=0.02)
+            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=max_shift, max_rot=max_rot, max_scale=max_scale)
 
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             if os.path.exists(LOGFILE):
