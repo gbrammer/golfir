@@ -42,7 +42,7 @@ def runit(field='', eso=None):
     else:
         print('Problem?')
         
-def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4]):
+def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4]):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -93,10 +93,8 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
     
     if use_hst_radec:
         radec = hawki.make_hst_radec(field, maglim=[16,22])
-    else:
-        radec = None
         
-    hawki.parse_and_run(extensions=extensions, radec=radec)
+    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=1000, max_shift=100, max_rot=3, max_scale=0.02)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
@@ -768,6 +766,8 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
     """
     Reduce a HAWKI chip
     """
+    from scipy.spatial import cKDTree
+    
     # Default calibrations
     flat = pyfits.open('RAW/M.HAWKI.2019-10-22T08_04_04.870.fits')
     gain = pyfits.open('RAW/M.HAWKI.2019-10-22T08_04_11.606.fits')
@@ -1229,18 +1229,62 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         cat = prep.make_SEP_catalog('{0}-{1}-ks'.format(ob_root, ext), threshold=3, column_case=str.upper)
         sn = cat['FLUX_APER_2'] / cat['FLUXERR_APER_2']
         clip = np.isfinite(sn) #& (cat['THRESH'] < 1e20)
-        
-        if assume_close:
-            idx, dr = radec_tab.match_to_catalog_sky(cat)
-            clip &= dr.value < assume_close
-            
-        #clip &= sn > 10
         cat = cat[clip]
-        N = 180
-        so = np.argsort(cat['MAG_AUTO'])[:N]
-        cat[so].write('{0}-{1}-ks.cat.fits'.format(ob_root, ext), overwrite=True)
         
-        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=[3,2000], radec=radec, clip=-120, simple=False, NITER=3, mag_limits=[12, 23])
+        clip &= sn > 10
+        N = 20
+        so = np.argsort(cat['MAG_AUTO'])[:N]
+        cat = cat[so]
+        
+        if assume_close > 0:
+            idx, dr = radec_tab.match_to_catalog_sky(cat)
+            clip = dr.value < assume_close
+            cat = cat[clip]
+            
+            # rev
+            idx, dr = cat.match_to_catalog_sky(radec_tab)
+            rclip = dr.value < assume_close
+            prep.table_to_radec(radec_tab[rclip], 'tmp.radec')
+            radec_i = 'tmp.radec'
+        else:
+            radec_i = radec
+            
+        cat.write('{0}-{1}-ks.cat.fits'.format(ob_root, ext), overwrite=True)
+        
+        if 'gaia' in radec:
+            triangle_size = [10,3700]
+        else:
+            triangle_size = [5,200]
+        
+        if False:
+
+            rad_rd = np.array([radec_tab['ra'], radec_tab['dec']]).T[rclip]
+            cat_rd = np.array([cat['X_WORLD'], cat['Y_WORLD']]).T
+
+            cat_xy = np.array([cat['X_IMAGE'], cat['Y_IMAGE']]).T
+
+            x0 = np.median(rad_rd, axis=0)
+            cosd = np.array([np.cos(x0[1]/180*np.pi), 1])
+
+            V1 = (cat_rd - x0)*cosd*3600
+            V2 = (rad_rd - x0)*cosd*3600
+            
+            # PIxels
+            x0 = drz_wcs.wcs.crpix
+            V1 = (cat_xy - x0)
+            V2 = np.array(drz_wcs.all_world2pix(rad_rd, pix_origin)) - x0
+            
+            maxKeep = 4
+            auto = 5
+            
+            pair_ix = match.match_catalog_tri(input, output, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
+            
+            pair_ix = match.match_catalog_tri(V1, V2, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
+            
+            from skimage.transform import SimilarityTransform
+            tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=SimilarityTransform, use_ransac=True)
+                
+        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, clip=-120, simple=False, NITER=3, mag_limits=[6, 23], triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=10, max_err_percentile=99, match_catalog_density=False)
         
         ######### Object masking
         if (align_iter == 0) & True:
