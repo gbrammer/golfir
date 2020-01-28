@@ -1238,7 +1238,7 @@ class MipsPSF(object):
         
         self.im = pyfits.open('/Users/gbrammer/Research/grizli/CONF/mips_24_100K.fits')
         self.data = self.im[0].data / self.im[0].data.sum()
-        self.native_scale = 0.5 #0.498
+        self.native_scale = 0.498 #0.5 #0.498
         
         self.scale = -1
         self.rmax = -1
@@ -1330,9 +1330,15 @@ class IracPSF(object):
             psf_file = '{0}-ch{1}-{2:.1f}.psf.fits'.format(aor, ch, scale)
             if verbose:
                 print('Read PSF data {0} / {1}'.format(file, psf_file))
+            
+            if os.path.exists(psf_file):    
+                psf = pyfits.open(psf_file)
+                psf_mask = (psf[0].data != 0)
+                psf_image = psf[0].data
+            else:
+                psf_image = None
+                psf_mask = None
                 
-            psf = pyfits.open(psf_file)
-            psf_mask = (psf[0].data != 0)
             footprints = []
             for i, coo in enumerate(log['corners']):
                 footprints.append(Path(coo))
@@ -1341,7 +1347,7 @@ class IracPSF(object):
             hull = ConvexHull(full_path.vertices)
             full_footprint = Path(full_path.vertices[hull.vertices,:])
             
-            psf_data[aor] = {'log':log, 'psf_image':psf[0].data, 
+            psf_data[aor] = {'log':log, 'psf_image':psf_image, 
                              'psf_mask':psf_mask, 'bcd_footprints':footprints, 
                              'footprint': full_footprint}
     
