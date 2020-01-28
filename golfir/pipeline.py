@@ -236,7 +236,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
         im = pyfits.open(file)
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
         ax = fig.add_subplot(1,2,1+i)
-        ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r')
+        ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
 
@@ -479,7 +479,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
         ax = fig.add_subplot(1,2,1+i)
         scl = (final_pix/initial_pix)**2
-        ax.imshow(im[0].data, vmin=-0.1*scl, vmax=1*scl, cmap='gray_r')
+        ax.imshow(im[0].data, vmin=-0.1*scl, vmax=1*scl, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
     
