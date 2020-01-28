@@ -34,8 +34,13 @@ def fetch_irac(root='j003528m2016', path='./'):
     print('\n\n==================\n Fetch {0} files \n==================\n\n'.format(keep.sum()))
     
     for i in idx:
+        xbcd = glob.glob(ipac['externalname'][i].replace('_bcd.fits', '_xbcd.fits.gz'))
+        if len(xbcd) > 0:
+            print(xbcd[0])
+            continue
+            
         out = '{0}_{1:05d}.zip'.format(root, i)
-        print(out)
+        print('Fetch: ', out)
         if not os.path.exists(out):
             os.system('wget -O {1} "{2}"'.format(root, out, ipac['accessWithAnc1Url'][i]))
     

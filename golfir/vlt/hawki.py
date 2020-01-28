@@ -94,7 +94,7 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
     if use_hst_radec:
         radec = hawki.make_hst_radec(field, maglim=[16,22])
         
-    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=1000, max_shift=100, max_rot=3, max_scale=0.02)
+    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
@@ -107,8 +107,8 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
         radec = hawki.make_hst_radec(field, maglim=[16,22])
         hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
     
-    from importlib import reload
-    reload(hawki)     
+    # from importlib import reload
+    # reload(hawki)     
     hawki.redrizzle_mosaics()
     
         
@@ -1232,7 +1232,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         cat = cat[clip]
         
         clip &= sn > 10
-        N = 20
+        N = 80
         so = np.argsort(cat['MAG_AUTO'])[:N]
         cat = cat[so]
         
@@ -1248,7 +1248,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
             radec_i = 'tmp.radec'
         else:
             radec_i = radec
-            
+            rclip = np.ones(len(radec_tab), dtype=bool)
         cat.write('{0}-{1}-ks.cat.fits'.format(ob_root, ext), overwrite=True)
         
         if 'gaia' in radec:
@@ -1258,7 +1258,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         
         if False:
 
-            rad_rd = np.array([radec_tab['ra'], radec_tab['dec']]).T[rclip]
+            rad_rd = np.array([radec_tab['X_WORLD'], radec_tab['Y_WORLD']]).T[rclip]
             cat_rd = np.array([cat['X_WORLD'], cat['Y_WORLD']]).T
 
             cat_xy = np.array([cat['X_IMAGE'], cat['Y_IMAGE']]).T
@@ -1277,14 +1277,14 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
             maxKeep = 4
             auto = 5
             
-            pair_ix = match.match_catalog_tri(input, output, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
+            #pair_ix = match.match_catalog_tri(input, output, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
             
             pair_ix = match.match_catalog_tri(V1, V2, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
             
             from skimage.transform import SimilarityTransform
             tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=SimilarityTransform, use_ransac=True)
                 
-        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, clip=-120, simple=False, NITER=3, mag_limits=[6, 23], triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=10, max_err_percentile=99, match_catalog_density=False)
+        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, clip=-120, simple=False, NITER=3, mag_limits=[6, 23], triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False)
         
         ######### Object masking
         if (align_iter == 0) & True:
