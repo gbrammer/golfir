@@ -2,7 +2,7 @@
 Full script for downloading and processing CHArGE fields
 """
 
-def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2):
+def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True):
     
     import os
     import glob
@@ -176,7 +176,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
                 psf_size=20
                 ch_num = int(ch[-1])
                 segmask=True
-                for p in [0.1, pix]:
+                for p in [0.1, final_pix]:
                     irac.mosaic_psf(output_root=root_i, target_pix=p, channel=ch_num, aors=aors_ch[ch], kernel=kernel, pixfrac=pixfrac, size=psf_size, native_orientation=False, instrument=instrument, subtract_background=False, segmentation_mask=segmask, max_R=10)
                     plt.close('all')
 
@@ -240,7 +240,8 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
 
-    fig.tight_layout(pad=0.3)
+    fig.axes[1].set_yticklabels([])
+    fig.tight_layout(pad=0.5)
     fig.savefig(f'{root}.init.png')
     plt.close('all')
     
@@ -441,8 +442,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
                             dq |= (np.abs(xp-xi) < 2) & (np.abs(yp-yi) > 10)
 
             if i == 0:
-                res = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, 
-                                                 kernel=kernel, pixfrac=pixfrac, data=None)
+                res = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=None)
                 # Copy header keywords
                 wcs_header = utils.to_header(wcs)
                 for k in im[0].header:
@@ -450,8 +450,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
                         out_header[k] = im[0].header[k]
 
             else:
-                _ = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, 
-                                               kernel=kernel, pixfrac=pixfrac, data=res[:3])
+                _ = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=res[:3])
 
             out_header['NDRIZIM'] += 1
             out_header['EXPTIME'] += im[0].header['EXPTIME']
@@ -476,41 +475,103 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
         im = pyfits.open(file)
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
         ax = fig.add_subplot(1,2,1+i)
-        ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r')
+        scl = (final_pix/initial_pix)**2
+        ax.imshow(im[0].data, vmin=-0.1*scl, vmax=1*scl, cmap='gray_r')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
     
     fig.axes[1].set_yticklabels([])
     
-    fig.tight_layout(pad=0.3)
+    fig.tight_layout(pad=0.5)
     fig.savefig(f'{root}.final.png')
     plt.close('all')
     
     ######## Sync
     ## Sync
     print(f's3://grizli-v1/Pipeline/{root}/IRAC/')
-
+    
+    make_html(root)
+    
     os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/'
               f' --exclude "*" --include "{root}-ch*drz*fits"'
               f' --include "{root}.*png"'
               ' --include "*-ch*psf*" --include "*log.fits"' 
+              ' --include "*wcs.[lp]*"'
+              ' --include "*html"'
               ' --acl public-read')
     
-    os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
+    if sync_xbcd:
+        os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
 def make_html(root):
+    
+    import astropy.io.fits as pyfits
+    im = pyfits.open(glob.glob(f'{root}-ch*sci.fits')[0])
+    ra = im[0].header['CRVAL1']
+    dec = im[0].header['CRVAL2']
+    
+    radius = 20. # arcmin
+
+    URL = "https://sha.ipac.caltech.edu/applications/Spitzer/SHA/#id=SearchByPosition&"
+    URL += f"RequestClass=ServerRequest&DoSearch=true&SearchByPosition.field.radius={radius/60:.5f}"
+    URL += f"&UserTargetWorldPt={ra};{dec};EQ_J2000&SimpleTargetPanel.field.resolvedBy=nedthensimbad&"
+    URL += "MoreOptions.field.prodtype=aor,pbcd,bcd&shortDesc=Position&isBookmarkAble=true&isDrillDownRoot=true&"
+    URL += "isSearchResult=true"
+    
     
     html = f"""
 <h3> {root} IRAC </h3>
 
 <p>
 <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">CHArGE HST</a>
-
+<p> SHA <a href="{URL}">query</a>
 <p>
-<a href="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png" width=800></a>
+<a href="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png" height=400></a>
 
 <p>
 <a href="{root}.init.png"><img src="{root}.init.png" width=800></a>
 <br>
 <a href="{root}.final.png"><img src="{root}.final.png" width=800></a>
+
+<pre>
 """
+    
+    groups = [(f'{root}-ch*drz*', 'Mosaics'), ('r*log.fits', 'Log'), ('r*psf.*', 'PSFs'), ('r*-ch2*psf.*', 'CH2 PSFs'), ('r*-ch3*psf.*', 'CH3 PSFs'), ('r*-ch4*psf.*', 'CH4 PSFs')][:-3]
+    for g in groups:
+        files = glob.glob(g[0])
+        if len(files) == 0:
+            continue
+        files.sort()
+        html += '\n####### {0}\n'.format(g[1])
+        for file in files:
+            html += f'<a href="{file}">{file}</a>\n'
+    
+    html += '</pre>\n'
+    
+    for ch in ['ch1', 'ch2']:
+        files = glob.glob(f'*-{ch}*psfr.fits')
+        files.sort()
+        if len(files) == 0:
+            continue
+        
+        html += '<p>\n'
+        for file in files:
+              html += '<a href="{0}"><img src={1} width=200></a>\n'.format(file, file.replace('.fits','.png'))
+    
+    html += '<h4>Alignment</h4><table>'
+    files = glob.glob('*wcs.log')
+    files.sort()
+    for file in files:
+        html += '<tr><td> <a href="{0}"><img src={0} width=150></a>\n<pre></td><td> <pre>'.format(file.replace('.log','.png'))
+        
+        lines = open(file).readlines()
+        html += ''.join(lines)
+        html += '</pre></td></tr>\n'
+       
+    html += '</table>'
+    
+    fp = open(f'{root}.irac.html','w')
+    fp.write(html)
+            
+    fp.close()
+    
