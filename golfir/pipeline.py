@@ -2,25 +2,25 @@
 Full script for downloading and processing CHArGE fields
 """
 
+import os
+import glob
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.path import Path
+
+from skimage.morphology import binary_dilation
+
+import astropy.io.fits as pyfits
+import astropy.wcs as pywcs
+import astropy.units as u
+
+import drizzlepac
+from drizzlepac.astrodrizzle import ablot
+
+from grizli import utils
+
 def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True):
     
-    import os
-    import glob
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib.path import Path
-
-    from skimage.morphology import binary_dilation
-
-    import astropy.io.fits as pyfits
-    import astropy.wcs as pywcs
-    import astropy.units as u
-
-    import drizzlepac
-    from drizzlepac.astrodrizzle import ablot
-
-    from grizli import utils
-
     from golfir import irac
     import golfir.utils
     from golfir.utils import get_wcslist
@@ -332,8 +332,11 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
         hst_wcs = pywcs.WCS(hst_im[0])
         hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
 
-        size = (np.round(np.array([hst_wcs._naxis1, hst_wcs._naxis2])*hst_wcs.pscale*pad/pixscale)*pixscale)
-
+        try:
+            size = (np.round(np.array([hst_wcs._naxis1, hst_wcs._naxis2])*hst_wcs.pscale*pad/pixscale)*pixscale)
+        except:
+            size = (np.round(np.array([hst_wcs._naxis[0], hst_wcs._naxis[1]])*hst_wcs.pscale*pad/pixscale)*pixscale)
+            
         out_header, out_wcs = utils.make_wcsheader(ra=hst_wcs.wcs.crval[0], 
                                                    dec=hst_wcs.wcs.crval[1],
                                                    size=size, 
@@ -505,7 +508,6 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
     
 def make_html(root):
     
-    import astropy.io.fits as pyfits
     im = pyfits.open(glob.glob(f'{root}-ch*sci.fits')[0])
     ra = im[0].header['CRVAL1']
     dec = im[0].header['CRVAL2']
