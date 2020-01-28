@@ -492,7 +492,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     plt.close('all')
     
     print('gzip mosaics')
-    os.system(f'gzip {root}-ch*_drz*fits')
+    os.system(f'gzip -f {root}-ch*_drz*fits')
     
     ######## Sync
     ## Sync

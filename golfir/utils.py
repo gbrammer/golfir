@@ -34,6 +34,11 @@ def fetch_irac(root='j003528m2016', path='./'):
     print('\n\n==================\n Fetch {0} files \n==================\n\n'.format(keep.sum()))
     
     for i in idx:
+        cbcd = glob.glob(ipac['externalname'][i].replace('_cbcd.fits', '_xbcd.fits.gz'))
+        if len(cbcd) > 0:
+            print('CBCD: ', cbcd[0])
+            continue
+            
         xbcd = glob.glob(ipac['externalname'][i].replace('_bcd.fits', '_xbcd.fits.gz'))
         if len(xbcd) > 0:
             print(xbcd[0])
@@ -43,10 +48,11 @@ def fetch_irac(root='j003528m2016', path='./'):
         print('Fetch: ', out)
         if not os.path.exists(out):
             os.system('wget -O {1} "{2}"'.format(root, out, ipac['accessWithAnc1Url'][i]))
-    
-    for i in idx:
-        out = '{0}_{1:05d}.zip'.format(root, i)
-        os.system('unzip -n {0}'.format(out))
+            
+            os.system('unzip -n {0}'.format(out))
+    # for i in idx:
+    #     out = '{0}_{1:05d}.zip'.format(root, i)
+    #     os.system('unzip -n {0}'.format(out))
 
 def get_wcslist(query='r*', skip=10):
     import glob

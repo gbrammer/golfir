@@ -4,6 +4,8 @@ Processing IRAC BCDs
 
 import glob
 import os
+import inspect
+import traceback
 
 import numpy as np
 import numpy.ma
@@ -70,9 +72,11 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 aors[aor].align_to_reference(reference=['GAIA'], radec=radec, 
                                              threshold=align_threshold)
             except:
-                fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
-                fp.write(time.ctime())
-                fp.close()
+                # fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
+                # fp.write(time.ctime())
+                # fp.close()
+                failed = '{0}-{1}_wcs.failed'.format(aor, aors[aor].label)
+                utils.log_exception(failed, traceback)
                 
                 pop_list.append(aor)
         
