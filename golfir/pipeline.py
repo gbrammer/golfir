@@ -504,7 +504,7 @@ def make_html(root):
 <h3> {root} IRAC </h3>
 
 <p>
-<a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{0}.summary.html">CHArGE HST</a>
+<a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">CHArGE HST</a>
 
 <p>
 <a href="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png" width=800></a>
@@ -513,10 +513,4 @@ def make_html(root):
 <a href="{root}.init.png"><img src="{root}.init.png" width=800></a>
 <br>
 <a href="{root}.final.png"><img src="{root}.final.png" width=800></a>
-"""
-
-    
-
-
-
 """
