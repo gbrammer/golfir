@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True):
+def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False):
     
     from golfir import irac
     import golfir.utils
@@ -34,9 +34,11 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
     os.chdir(PATH)
     
     # Fetch IRAC bcds
-    os.system('wget https://s3.amazonaws.com/grizli-v1/IRAC/{0}_ipac.fits'.format(root))
+    if not os.path.exists('{0}_ipac.fits'.format(root)):
+        os.system('wget https://s3.amazonaws.com/grizli-v1/IRAC/{0}_ipac.fits'.format(root))
     
-    golfir.utils.fetch_irac(root=root, path='./')
+    if not skip_fetch:
+        golfir.utils.fetch_irac(root=root, path='./')
     
     # Sync CHArGE HST images
     os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
@@ -489,6 +491,9 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
     fig.savefig(f'{root}.final.png')
     plt.close('all')
     
+    print('gzip mosaics')
+    os.system(f'gzip {root}-ch*_drz*fits')
+    
     ######## Sync
     ## Sync
     print(f's3://grizli-v1/Pipeline/{root}/IRAC/')
@@ -496,7 +501,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
     make_html(root)
     
     os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/'
-              f' --exclude "*" --include "{root}-ch*drz*fits"'
+              f' --exclude "*" --include "{root}-ch*drz*fits*"'
               f' --include "{root}.*png"'
               ' --include "*-ch*psf*" --include "*log.fits"' 
               ' --include "*wcs.[lp]*"'
@@ -508,7 +513,7 @@ def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square'
     
 def make_html(root):
     
-    im = pyfits.open(glob.glob(f'{root}-ch*sci.fits')[0])
+    im = pyfits.open(glob.glob(f'{root}-ch*sci.fits*')[0])
     ra = im[0].header['CRVAL1']
     dec = im[0].header['CRVAL2']
     
@@ -550,7 +555,7 @@ def make_html(root):
     
     html += '</pre>\n'
     
-    for ch in ['ch1', 'ch2']:
+    for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
         files = glob.glob(f'*-{ch}*psfr.fits')
         files.sort()
         if len(files) == 0:
