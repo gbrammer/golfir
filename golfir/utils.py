@@ -17,8 +17,8 @@ from . import irac
 # except:
 #     ds9 = None
     
-def fetch_irac(root='j003528m2016'):
-    ipac = utils.read_catalog('../{0}_ipac.fits'.format(root))
+def fetch_irac(root='j003528m2016', path='./'):
+    ipac = utils.read_catalog(path+'{0}_ipac.fits'.format(root))
     
     # Overlaps
     ext = np.array([e.split('/')[0] for e in ipac['externalname']])
