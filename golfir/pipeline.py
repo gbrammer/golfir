@@ -1,0 +1,522 @@
+"""
+Full script for downloading and processing CHArGE fields
+"""
+
+def go(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2):
+    
+    import os
+    import glob
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.path import Path
+
+    from skimage.morphology import binary_dilation
+
+    import astropy.io.fits as pyfits
+    import astropy.wcs as pywcs
+    import astropy.units as u
+
+    import drizzlepac
+    from drizzlepac.astrodrizzle import ablot
+
+    from grizli import utils
+
+    from golfir import irac
+    import golfir.utils
+    from golfir.utils import get_wcslist
+    
+    PATH = os.path.join(home, root)
+    try:
+        os.mkdir(PATH)
+    except:
+        pass
+
+    os.chdir(PATH)
+    
+    # Fetch IRAC bcds
+    os.system('wget https://s3.amazonaws.com/grizli-v1/IRAC/{0}_ipac.fits'.format(root))
+    
+    golfir.utils.fetch_irac(root=root, path='./')
+    
+    # Sync CHArGE HST images
+    os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
+              f' --exclude "*" --include "{root}*seg.fits*"'
+              f' --include "{root}-ir_drz*fits*"'
+              f' --include "{root}*psf.fits*"'
+              f' --include "{root}-f[01]*_drz*fits.gz"'
+              f' --include "{root}*phot.fits"')
+    
+    # Drizzle properties of the preliminary mosaic
+    #pixfrac, pix, kernel = 0.2, 1.0, 'square'       
+    
+    # Define an output WCS aligned in pixel phase to the HST mosaic ()
+
+    if not os.path.exists('ref_hdu.fits'):
+        wcslist = get_wcslist(skip=10)
+        out_hdu = utils.make_maximal_wcs(wcslist, pixel_scale=initial_pix, theta=0, pad=5, get_hdu=True, verbose=True)
+
+        # Make sure pixels align
+        ref_file = glob.glob('{0}-f1*_drz_sci.fits.gz'.format(root))[-1]
+
+        print(f'\nHST reference image: {ref_file}\n')
+
+        ref_hdu = pyfits.open(ref_file)[0].header
+        ref_filter = utils.get_hst_filter(ref_hdu).lower()
+
+        ref_wcs = pywcs.WCS(ref_hdu)
+        ref_rd = ref_wcs.all_pix2world(np.array([[-0.5, -0.5]]), 0).flatten()
+        target_phase = np.array([0.5, 0.5])#/(pix/0.1)
+        for k in ['RADESYS', 'LATPOLE', 'LONPOLE']:
+            out_hdu.header[k] = ref_hdu[k]
+
+        # Shift CRVAL to same tangent point
+        out_wcs = pywcs.WCS(out_hdu.header)
+        out_xy = out_wcs.all_world2pix(np.array([ref_wcs.wcs.crval]), 1).flatten()
+        out_hdu.header['CRVAL1'], out_hdu.header['CRVAL2'] = tuple(ref_wcs.wcs.crval)
+        out_hdu.header['CRPIX1'], out_hdu.header['CRPIX2'] = tuple(out_xy)
+
+        # Align integer pixel phase
+        out_wcs = pywcs.WCS(out_hdu.header)
+        out_xy = out_wcs.all_world2pix(np.array([ref_rd]), 0).flatten()
+        xy_phase = out_xy - np.floor(out_xy)
+        new_crpix = out_wcs.wcs.crpix - (xy_phase - target_phase)
+        out_hdu.header['CRPIX1'], out_hdu.header['CRPIX2'] = tuple(new_crpix)
+        out_wcs = pywcs.WCS(out_hdu.header)
+
+        out_hdu.writeto('ref_hdu.fits', output_verify='Fix')
+
+    else:
+        out_hdu = pyfits.open('ref_hdu.fits')[1]
+    
+    ########
+    min_frametime = 20
+
+    query = 'r*'
+    files = glob.glob('{0}/ch*/bcd/SPITZER_I*cbcd.fits'.format(query))
+    files += glob.glob('{0}/ch*/bcd/SPITZER_I*xbcd.fits.gz'.format(query))
+    files += glob.glob('{0}/ch*/bcd/SPITZER_M*ebcd.fits'.format(query))
+    files.sort()
+
+    roots = np.array([file.split('/')[0] for file in files])
+    channels = np.array([file.split('_')[1] for file in files])
+    all_roots = np.array(['{0}-{1}'.format(r, c.replace('I','ch').replace('M', 'mips')) for r, c in zip(roots, channels)])
+
+    tab = {'aor':[], 'N':[], 'channel':[]}
+    for r in np.unique(all_roots):
+        tab['aor'].append(r.split('-')[0])
+        tab['N'].append((all_roots == r).sum())
+        tab['channel'].append(r.split('-')[1])
+
+    aors = utils.GTable(tab)
+    print(aors)
+    
+    ########
+    SKIP = True          # Don't regenerate finished files
+    delete_group = False # Delete intermediate products from memory
+    zip_outputs = False    # GZip intermediate products
+
+    channels = ['ch1','ch2','ch3','ch4','mips1']
+    aors_ch = {}
+    
+    ########
+    # Process mosaics by AOR
+    # Process in groups, helps for fields like HFF with dozens/hundreds of AORs!
+    for ch in channels:
+
+        aor = aors[(aors['channel'] == ch) & (aors['N'] > 5)]
+        if len(aor) == 0:
+            continue
+
+        #aors_ch[ch] = []
+
+        if ch in ['ch1','ch2']:
+            NPER, instrument, min_frametime = 500, 'irac', 10
+        if ch in ['ch3','ch4']:
+            NPER, instrument, min_frametime = 500, 'irac', 10
+            #NPER, instrument, min_frametime = 800, 'irac', 20
+        elif ch in ['mips1']:
+            NPER, instrument, min_frametime, pix = 400, 'mips', 2, 1.0
+
+        nsort = np.cumsum(aor['N']/NPER)
+        NGROUP = int(np.ceil(nsort.max()))
+
+        count = 0
+
+        for g in range(NGROUP):
+            root_i = root+'-{0:02d}'.format(g)
+
+            gsel = (nsort > g) & (nsort <= g+1)
+            aor_ids = list(aor['aor'][gsel])
+            print('{0}-{1}   N_AOR = {2:>2d}  N_EXP = {3:>4d}'.format(root_i, ch,  len(aor_ids), aor['N'][gsel].sum()))
+            count += gsel.sum()
+
+            files = glob.glob('{0}-{1}*'.format(root_i, ch))
+            if (len(files) > 0) & (SKIP): 
+                print('Skip {0}-{1}'.format(root_i, ch))
+                continue
+
+            # Do internal alignment to GAIA.  
+            # Otherwise, set `radec` to the name of a file that has two columns with 
+            # reference ra/dec.
+            radec = None 
+
+            # Pipeline
+            if instrument == 'mips':
+                aors_ch[ch] = irac.process_all(channel=ch.replace('mips','ch'), output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, align_threshold=0.15, radec=radec, run_alignment=False, mips_ext='_ebcd.fits')
+            else:
+                aors_ch[ch] = irac.process_all(channel=ch, output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, radec=radec)
+
+            if len(aors_ch[ch]) == 0:
+                continue
+
+            # PSFs
+            plt.ioff()
+
+            if instrument != 'mips':
+                psf_size=20
+                ch_num = int(ch[-1])
+                segmask=True
+                for p in [0.1, pix]:
+                    irac.mosaic_psf(output_root=root_i, target_pix=p, channel=ch_num, aors=aors_ch[ch], kernel=kernel, pixfrac=pixfrac, size=psf_size, native_orientation=False, instrument=instrument, subtract_background=False, segmentation_mask=segmask, max_R=10)
+                    plt.close('all')
+
+                psf_size=30
+                p = 0.1
+                irac.mosaic_psf(output_root=root_i, target_pix=p, channel=ch_num, aors=aors_ch[ch], kernel=kernel, pixfrac=pixfrac, size=psf_size, native_orientation=True, subtract_background=False, segmentation_mask=segmask, max_R=10)
+
+                plt.close('all')
+
+            if delete_group:
+                del(aors_ch[ch])
+
+            print('Done {0}-{1}, gzip products'.format(root_i, ch))
+
+            if zip_outputs:
+                os.system('gzip {0}*-{1}_drz*fits'.format(root_i, ch))
+        
+        # PSFs
+        if instrument != 'mips':
+            # Average PSF
+            p = 0.1
+            files = glob.glob('*{0}-{1:.1f}*psfr.fits'.format(ch, p))
+            files.sort()
+            avg = None
+            for file in files: 
+                im = pyfits.open(file)
+                if avg is None:
+                    wht = im[0].data != 0
+                    avg = im[0].data*wht
+                else:
+                    wht_i = im[0].data != 0
+                    avg += im[0].data*wht_i
+                    wht += wht_i
+
+            avg = avg/wht
+            avg[wht == 0] = 0
+
+            # Window
+            from photutils import (HanningWindow, TukeyWindow, 
+                                   CosineBellWindow,
+                                   SplitCosineBellWindow, TopHatWindow)
+
+            coswindow = CosineBellWindow(alpha=1)
+            avg *= coswindow(avg.shape)**0.05
+            avg /= avg.sum()
+
+            pyfits.writeto('{0}-{1}-{2:0.1f}.psfr_avg.fits'.format(root, ch, p), data=avg, header=im[0].header, overwrite=True)
+    
+    ####
+    ## Show the initial product
+    plt.ioff()
+    files = glob.glob(f'{root}-00-ch*sci.fits')
+    files.sort()
+
+    fig = plt.figure(figsize=[14, 7])
+    for i, file in enumerate(files[:2]):
+        im = pyfits.open(file)
+        print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
+        ax = fig.add_subplot(1,2,1+i)
+        ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r')
+        ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
+                transform=ax.transAxes)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(f'{root}.init.png')
+    plt.close('all')
+    
+    #######
+    # Make more compact individual exposures and clean directories
+    wfiles = glob.glob('r*/*/bcd/*_I[1-4]_*wcs.fits')
+    #wfiles = glob.glob('r*/*/bcd/*_M[1-4]_*wcs.fits')
+    wfiles.sort()
+    for wcsfile in wfiles:
+        outfile = wcsfile.replace('_wcs.fits', '_xbcd.fits.gz')
+        if os.path.exists(outfile):
+            print(outfile)
+        else:
+            irac.combine_products(wcsfile)
+            print('Run: ', outfile)
+
+        if os.path.exists(outfile):
+            remove_files = glob.glob('{0}*fits'.format(wcsfile.split('_wcs')[0]))
+            for f in remove_files:
+                print('   rm ', f)
+                os.remove(f)
+                
+    #############
+    # Drizzle final mosaics
+    # Make final mosaic a bit bigger than the HST image
+    pad = 2.5
+
+    # Pixel scale of final mosaic.
+    # Don't make too small if not many dithers available as in this example.
+    # But for well-sampled mosaics like RELICS / HFF, can push this to perhaps 0.3" / pix
+    pixscale = final_pix #0.5
+
+    # Again, if have many dithers maybe can use more aggressive drizzle parameters,
+    # like a 'point' kernel or smaller pixfrac (a 'point' kernel is pixfrac=0)
+    #kernel, pixfrac = 'square', 0.2
+
+    # Correction for bad columns near bright stars
+    #pulldown_mag = 15.2 
+
+    ##############
+    # Dilation for CR rejection
+    dil = np.ones((3,3))
+    driz_cr = [7, 4]
+    blot_interp = 'poly5'
+    bright_fmax = 0.5
+    
+    ### Drizzle
+    for ch in ['ch1', 'ch2', 'ch3', 'ch4', 'mips1']: #[:2]:
+        ###########
+        # Files and reference image for extra CR rejection
+        if ch == 'mips1':
+            files = glob.glob('r*/ch1/bcd/SPITZER_M1_*xbcd.fits*'.format(ch))
+            files.sort()
+            pulldown_mag = -10
+            pixscale = 1.
+            kernel = 'point'
+        else:
+            files = glob.glob('r*/{0}/bcd/*_I?_*xbcd.fits*'.format(ch))
+            files.sort()
+
+        #ref = pyfits.open('{0}-00-{1}_drz_sci.fits'.format(root, ch))
+        #ref_data = ref[0].data.astype(np.float32)
+
+        ref_files = glob.glob(f'{root}-??-{ch}*sci.fits')
+        if len(ref_files) == 0:
+            continue
+
+        num = None
+        for ref_file in ref_files:
+            ref = pyfits.open(ref_file)
+            wht = pyfits.open(ref_file.replace('_sci.fits', '_wht.fits'))
+            if num is None:
+                num = ref[0].data*wht[0].data
+                den = wht[0].data
+            else:
+                num += ref[0].data*wht[0].data
+                den += wht[0].data
+
+        ref_data = (num/den).astype(np.float32)
+        ref_data[den <= 0] = 0
+
+        ref_wcs = pywcs.WCS(ref[0].header, relax=True) 
+        ref_wcs.pscale = utils.get_wcs_pscale(ref_wcs) 
+
+        ##############
+        # Output WCS based on HST footprint
+        hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
+        hst_wcs = pywcs.WCS(hst_im[0])
+        hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
+
+        size = (np.round(np.array([hst_wcs._naxis1, hst_wcs._naxis2])*hst_wcs.pscale*pad/pixscale)*pixscale)
+
+        out_header, out_wcs = utils.make_wcsheader(ra=hst_wcs.wcs.crval[0], 
+                                                   dec=hst_wcs.wcs.crval[1],
+                                                   size=size, 
+                                                   pixscale=pixscale, 
+                                                   get_hdu=False, theta=0)
+
+        ##############
+        # Bright stars for pulldown correction
+        ph = utils.read_catalog('{0}-00-{1}.cat.fits'.format(root, ch)) 
+        bright = (ph['mag_auto'] < pulldown_mag) # & (ph['flux_radius'] < 3)
+        ph = ph[bright]
+
+        ##############
+        # Now do the drizzling
+        yp, xp = np.indices((256, 256))
+        orig_files = []
+
+        out_header['DRIZ_CR0'] = driz_cr[0]
+        out_header['DRIZ_CR1'] = driz_cr[1]
+        out_header['KERNEL'] = kernel
+        out_header['PIXFRAC'] = pixfrac
+        out_header['NDRIZIM'] = 0
+        out_header['EXPTIME'] = 0
+        out_header['BUNIT'] = 'microJy'
+        out_header['FILTER'] = ch
+
+        med_root = 'xxx'
+        N = len(files)
+
+        for i, file in enumerate(files):#[:100]):
+
+            print('{0}/{1} {2}'.format(i, N, file))
+
+            if file in orig_files:
+                continue
+
+            im = pyfits.open(file)
+            ivar = 1/im['CBUNC'].data**2    
+            msk = (~np.isfinite(ivar)) | (~np.isfinite(im['CBCD'].data))
+            im['CBCD'].data[msk] = 0
+            ivar[msk] = 0
+
+            wcs = pywcs.WCS(im['WCS'].header, relax=True)
+            wcs.pscale = utils.get_wcs_pscale(wcs)
+            fp = Path(wcs.calc_footprint())
+
+            med_root_i = im.filename().split('/')[0]
+            if med_root != med_root_i:
+                print('\n Read {0}-{1}_med.fits \n'.format(med_root_i, ch))
+                med = pyfits.open('{0}-{1}_med.fits'.format(med_root_i, ch))
+                med_data = med[0].data.astype(np.float32)
+                med_root = med_root_i
+
+                try:
+                    gaia_rd = utils.read_catalog('{0}-{1}_gaia.radec'.format(med_root_i, ch))
+                    ii, rr = gaia_rd.match_to_catalog_sky(ph)
+                    gaia_rd = gaia_rd[ii][rr.value < 2]
+                    gaia_pts = np.array([gaia_rd['ra'].data, gaia_rd['dec'].data]).T
+                except:
+                    gaia_rd = []
+
+            #data = im['CBCD'].data - aor_med[0].data
+
+            # Change output units to uJy / pix
+            if ch == 'mips1':
+                # un = 1*u.MJy/u.sr
+                # #to_ujy_px = un.to(u.uJy/u.arcsec**2).value*(out_wcs.pscale**2)
+                # to_ujy_px = un.to(u.uJy/u.arcsec**2).value*(native_scale**2)
+                to_ujy_px = 146.902690
+            else:
+                # native_scale = 1.223
+                # un = 1*u.MJy/u.sr
+                # #to_ujy_px = un.to(u.uJy/u.arcsec**2).value*(out_wcs.pscale**2)
+                # to_ujy_px = un.to(u.uJy/u.arcsec**2).value*(native_scale**2)
+                to_ujy_px = 35.17517196810
+
+            blot_data = ablot.do_blot(ref_data, ref_wcs, wcs, 1, coeffs=True, interp=blot_interp, 
+                                      sinscl=1.0, stepsize=10, wcsmap=None)/to_ujy_px
+
+            # mask for bright stars
+            eblot = 1-np.clip(blot_data, 0, bright_fmax)/bright_fmax
+
+            # Initial CR
+            clean = im[0].data - med[0].data - im['WCS'].header['PEDESTAL']
+            dq = (clean - blot_data)*np.sqrt(ivar)*eblot > driz_cr[0]
+
+            # Adjacent CRs
+            dq_dil = binary_dilation(dq, selem=dil)
+            dq |= ((clean - blot_data)*np.sqrt(ivar)*eblot > driz_cr[1]) & (dq_dil)
+
+            # Very negative pixels
+            dq |= clean*np.sqrt(ivar) < -4
+
+            original_dq = im['WCS'].data - (im['WCS'].data & 1)
+            dq |= original_dq > 0
+
+            # Pulldown correction for bright stars
+            if len(gaia_rd) > 0:       
+                mat = fp.contains_points(gaia_pts) 
+                if mat.sum() > 0:
+                    xg, yg = wcs.all_world2pix(gaia_rd['ra'][mat], gaia_rd['dec'][mat], 0)
+                    sh = dq.shape
+                    mat = (xg > 0) & (xg < sh[1]) & (yg > 0) & (yg < sh[0])
+                    if mat.sum() > 0:
+                        for xi, yi in zip(xg[mat], yg[mat]):
+                            dq |= (np.abs(xp-xi) < 2) & (np.abs(yp-yi) > 10)
+
+            if i == 0:
+                res = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, 
+                                                 kernel=kernel, pixfrac=pixfrac, data=None)
+                # Copy header keywords
+                wcs_header = utils.to_header(wcs)
+                for k in im[0].header:
+                    if (k not in ['', 'HISTORY', 'COMMENT']) & (k not in out_header) & (k not in wcs_header):
+                        out_header[k] = im[0].header[k]
+
+            else:
+                _ = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, 
+                                               kernel=kernel, pixfrac=pixfrac, data=res[:3])
+
+            out_header['NDRIZIM'] += 1
+            out_header['EXPTIME'] += im[0].header['EXPTIME']
+
+        # Pixel scale factor for weights
+        wht_scale = (out_wcs.pscale/wcs.pscale)**-4
+
+        # Write final images
+        pyfits.writeto('{0}-{1}_drz_sci.fits'.format(root, ch), data=res[0]*to_ujy_px, header=out_header, 
+                       output_verify='fix', overwrite=True)
+        pyfits.writeto('{0}-{1}_drz_wht.fits'.format(root, ch), data=res[1]*wht_scale/to_ujy_px**2, 
+                       header=out_header, output_verify='fix', overwrite=True)
+    
+    ##########
+    ## Show the final drizzled images
+    plt.ioff()
+    files = glob.glob(f'{root}-ch*sci.fits')
+    files.sort()
+
+    fig = plt.figure(figsize=[14, 7])
+    for i, file in enumerate(files[:2]):
+        im = pyfits.open(file)
+        print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
+        ax = fig.add_subplot(1,2,1+i)
+        ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r')
+        ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
+                transform=ax.transAxes)
+    
+    fig.axes[1].set_yticklabels([])
+    
+    fig.tight_layout(pad=0.3)
+    fig.savefig(f'{root}.final.png')
+    plt.close('all')
+    
+    ######## Sync
+    ## Sync
+    print(f's3://grizli-v1/Pipeline/{root}/IRAC/')
+
+    os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/'
+              f' --exclude "*" --include "{root}-ch*drz*fits"'
+              f' --include "{root}.*png"'
+              ' --include "*-ch*psf*" --include "*log.fits"' 
+              ' --acl public-read')
+    
+    os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
+    
+def make_html(root):
+    
+    html = f"""
+<h3> {root} IRAC </h3>
+
+<p>
+<a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{0}.summary.html">CHArGE HST</a>
+
+<p>
+<a href="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png" width=800></a>
+
+<p>
+<a href="{root}.init.png"><img src="{root}.init.png" width=800></a>
+<br>
+<a href="{root}.final.png"><img src="{root}.final.png" width=800></a>
+"""
+
+    
+
+
+
+"""
