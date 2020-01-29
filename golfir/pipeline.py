@@ -508,7 +508,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
               f' --include "{root}.*png"'
               ' --include "*-ch*psf*" --include "*log.fits"' 
               ' --include "*wcs.[lp]*"'
-              ' --include "*html"'
+              ' --include "*html" --include "*fail*"'
               ' --acl public-read')
     
     if sync_xbcd:
@@ -548,7 +548,7 @@ def make_html(root):
 <pre>
 """
     
-    groups = [(f'{root}-ch*drz*', 'Mosaics'), ('r*log.fits', 'Log'), ('r*psf.*', 'PSFs'), ('r*-ch2*psf.*', 'CH2 PSFs'), ('r*-ch3*psf.*', 'CH3 PSFs'), ('r*-ch4*psf.*', 'CH4 PSFs')][:-3]
+    groups = [(f'{root}-ch*drz*', 'Mosaics'), ('r*log.fits', 'Log'), ('*fail*', 'Failed') ('r*psf.*', 'PSFs'), ('r*-ch2*psf.*', 'CH2 PSFs'), ('r*-ch3*psf.*', 'CH3 PSFs'), ('r*-ch4*psf.*', 'CH4 PSFs')][:-3]
     for g in groups:
         files = glob.glob(g[0])
         if len(files) == 0:
