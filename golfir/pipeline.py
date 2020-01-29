@@ -459,7 +459,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                             dq |= (np.abs(xp-xi) < 2) & (np.abs(yp-yi) > 10)
 
             if i == 0:
-                res = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=None)
+                res = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=None, verbose=False)
                 # Copy header keywords
                 wcs_header = utils.to_header(wcs)
                 for k in im[0].header:
@@ -467,7 +467,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                         out_header[k] = im[0].header[k]
 
             else:
-                _ = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=res[:3])
+                _ = utils.drizzle_array_groups([clean], [ivar*(dq == 0)], [wcs], outputwcs=out_wcs, kernel=kernel, pixfrac=pixfrac, data=res[:3], verbose=False)
 
             out_header['NDRIZIM'] += 1
             out_header['EXPTIME'] += im[0].header['EXPTIME']
