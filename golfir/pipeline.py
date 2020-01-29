@@ -47,6 +47,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
 
             utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
+            return True
             
     # Sync CHArGE HST images
     os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
@@ -522,9 +523,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     if sync_xbcd:
         os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
-    print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
-    
-    utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
+    msg = f'### Done: \n    https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html'
+        
+    utils.log_comment(f'/tmp/{root}.success', msg, verbose=True, show_date=True)
     
 def make_html(root):
     
