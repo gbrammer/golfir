@@ -27,7 +27,10 @@ def fetch_irac(root='j003528m2016', path='./'):
     inst = np.array([e.split(' ')[0] for e in ipac['wavelength']])
     
     keep = (inst == 'IRAC') & (utils.column_values_in_list(ext, ext_list))
-            
+    
+    if keep.sum() == 0:
+        return False
+                
     so = np.argsort(ipac['externalname'][keep])
     idx = np.arange(len(ipac))[keep][so]
     
@@ -53,7 +56,9 @@ def fetch_irac(root='j003528m2016', path='./'):
     # for i in idx:
     #     out = '{0}_{1:05d}.zip'.format(root, i)
     #     os.system('unzip -n {0}'.format(out))
-
+    
+    return ipac[keep]
+    
 def get_wcslist(query='r*', skip=10):
     import glob
     import astropy.io.fits as pyfits

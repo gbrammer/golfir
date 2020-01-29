@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None):
     
     from golfir import irac
     import golfir.utils
@@ -38,8 +38,16 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         os.system('wget https://s3.amazonaws.com/grizli-v1/IRAC/{0}_ipac.fits'.format(root))
     
     if not skip_fetch:
-        golfir.utils.fetch_irac(root=root, path='./')
-    
+        res = golfir.utils.fetch_irac(root=root, path='./')
+        
+        if res in [False, None]:
+            # Nothing to do
+            make_html(root)
+
+            print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
+
+            utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
+            
     # Sync CHArGE HST images
     os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
               f' --exclude "*" --include "{root}*seg.fits*"'
@@ -160,7 +168,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             # Do internal alignment to GAIA.  
             # Otherwise, set `radec` to the name of a file that has two columns with 
             # reference ra/dec.
-            radec = None 
+            #radec = None 
 
             # Pipeline
             if instrument == 'mips':
@@ -515,6 +523,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
     print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
+    
+    utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
     
 def make_html(root):
     
