@@ -528,6 +528,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     utils.log_comment(f'/tmp/{root}.success', msg, verbose=True, show_date=True)
     
 def make_html(root):
+    import time
     
     im = pyfits.open(glob.glob(f'{root}-ch*sci.fits*')[0])
     ra = im[0].header['CRVAL1']
@@ -543,7 +544,7 @@ def make_html(root):
     
     
     html = f"""
-<h3> {root} IRAC </h3>
+<h3> {root} IRAC ({time.ctime()})</h3>
 
 <p>
 <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">CHArGE HST</a>
