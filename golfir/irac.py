@@ -84,7 +84,8 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
         return {}
             
     for aor in pop_list:
-        p = aors.pop(aor)
+        if aor in aors:
+            p = aors.pop(aor)
     
     if len(aors) == 0:
         return {}

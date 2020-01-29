@@ -201,6 +201,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             # Average PSF
             p = 0.1
             files = glob.glob('*{0}-{1:.1f}*psfr.fits'.format(ch, p))
+            if len(files) == 0:
+                continue
+                
             files.sort()
             avg = None
             for file in files: 
@@ -511,7 +514,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     if sync_xbcd:
         os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
-    print(f'### Done: https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
+    print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
     
 def make_html(root):
     
