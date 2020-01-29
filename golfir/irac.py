@@ -75,7 +75,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 # fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
                 # fp.write(time.ctime())
                 # fp.close()
-                failed = '{0}-{1}_wcs.failed'.format(aor, aors[aor].label)
+                failed = '{0}-{1}_wcs.failed.txt'.format(aor, aors[aor].label)
                 utils.log_exception(failed, traceback)
                 
                 pop_list.append(aor)
