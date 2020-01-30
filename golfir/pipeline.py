@@ -362,6 +362,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         else:
             driz_ref_im = pyfits.open(drizzle_ref_file)
             out_wcs = pywcs.WCS(driz_ref_im[0].header, relax=True)
+            out_wcs.pscale = utils.get_wcs_pscale(out_wcs) 
+            
             out_header = utils.to_header(out_wcs)
             
         ##############
