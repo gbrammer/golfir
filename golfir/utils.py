@@ -39,6 +39,9 @@ def fetch_irac(root='j003528m2016', path='./'):
     N = keep.sum()
     
     for ix, i in enumerate(idx):
+        if ('pbcd/' in ipac['externalname'][i]) | ('_maic.fits' in ipac['externalname'][i]):
+            continue
+            
         cbcd = glob.glob(ipac['externalname'][i].replace('_cbcd.fits', '_xbcd.fits.gz'))
         if len(cbcd) > 0:
             print('CBCD ({0:>4} / {1:>4}): {2}'.format(ix, N, cbcd[0]))
@@ -56,7 +59,10 @@ def fetch_irac(root='j003528m2016', path='./'):
             
             os.system('unzip -n {0}'.format(out))
             print('')
-            
+    
+    if len(glob.glob(f'{root}*.zip')) == 0:
+        return False
+                
     # for i in idx:
     #     out = '{0}_{1:05d}.zip'.format(root, i)
     #     os.system('unzip -n {0}'.format(out))
