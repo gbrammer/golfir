@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file=None):
     
     from golfir import irac
     import golfir.utils
