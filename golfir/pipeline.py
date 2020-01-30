@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file=None):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file=''):
     
     from golfir import irac
     import golfir.utils
@@ -342,7 +342,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
         ##############
         # Output WCS based on HST footprint
-        if drizzle_ref_file is None:
+        if drizzle_ref_file == '':
             hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
             hst_wcs = pywcs.WCS(hst_im[0])
             hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
