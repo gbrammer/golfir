@@ -342,21 +342,28 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
         ##############
         # Output WCS based on HST footprint
-        hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
-        hst_wcs = pywcs.WCS(hst_im[0])
-        hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
+        if drizzle_ref_file is None:
+            hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
+            hst_wcs = pywcs.WCS(hst_im[0])
+            hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
 
-        try:
-            size = (np.round(np.array([hst_wcs._naxis1, hst_wcs._naxis2])*hst_wcs.pscale*pad/pixscale)*pixscale)
-        except:
-            size = (np.round(np.array([hst_wcs._naxis[0], hst_wcs._naxis[1]])*hst_wcs.pscale*pad/pixscale)*pixscale)
+            try:
+                size = (np.round(np.array([hst_wcs._naxis1, hst_wcs._naxis2])*hst_wcs.pscale*pad/pixscale)*pixscale)
+            except:
+                size = (np.round(np.array([hst_wcs._naxis[0], hst_wcs._naxis[1]])*hst_wcs.pscale*pad/pixscale)*pixscale)
             
-        out_header, out_wcs = utils.make_wcsheader(ra=hst_wcs.wcs.crval[0], 
-                                                   dec=hst_wcs.wcs.crval[1],
-                                                   size=size, 
-                                                   pixscale=pixscale, 
-                                                   get_hdu=False, theta=0)
-
+            _x = utils.make_wcsheader(ra=hst_wcs.wcs.crval[0], 
+                                      dec=hst_wcs.wcs.crval[1],
+                                      size=size, 
+                                      pixscale=pixscale, 
+                                      get_hdu=False, theta=0)
+            
+            out_header, out_wcs = _x
+        else:
+            driz_ref_im = pyfits.open(drizzle_ref_file)
+            out_wcs = pywcs.WCS(driz_ref_im[0].header, relax=True)
+            out_header = utils.to_header(out_wcs)
+            
         ##############
         # Bright stars for pulldown correction
         ph = utils.read_catalog('{0}-00-{1}.cat.fits'.format(root, ch)) 
