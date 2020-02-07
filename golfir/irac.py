@@ -6,6 +6,7 @@ import glob
 import os
 import inspect
 import traceback
+from collections import OrderedDict
 
 import numpy as np
 import numpy.ma
@@ -48,7 +49,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
     if use_xbcd:
         inst_key = 'SPITZER*_xbcd.fits*'
             
-    aors = {}
+    aors = OrderedDict()
     pop_list = []
     N = len(aor_ids)
     for i, aor in enumerate(aor_ids):
@@ -1106,7 +1107,7 @@ def init_model_attr(model):
     Initialize pscale attribute of a model object
     """
     if not hasattr(model, 'pscale'):
-        model.pscale = {}
+        model.pscale = OrderedDict()
         for k in model.param_names:
             model.pscale[k] = 1.
     else:
@@ -1295,8 +1296,8 @@ class IracPSF(object):
     Tools for generating an IRAC PSF at an arbitrary location in a mosaic
     """
     def __init__(self, ch=1, scale=0.1, verbose=True, aor_list=None, avg_psf=None):
-        self.psf_data = {}
-        self.psf_arrays = {}
+        self.psf_data = OrderedDict()
+        self.psf_arrays = OrderedDict()
         self.ch = ch
         self.scale = scale
         self.avg_psf = avg_psf
@@ -1315,6 +1316,7 @@ class IracPSF(object):
     def load_psf_data(self, ch=1, scale=0.1, verbose=True, aor_list=None, avg_psf=None):
     
         import glob
+        
         from grizli import utils
         #from matplotlib.patches import Polygon
         from matplotlib.path import Path
@@ -1323,7 +1325,7 @@ class IracPSF(object):
         files = glob.glob('*ch{0}.log.fits'.format(ch))
         files.sort()
     
-        psf_data = {}
+        psf_data = OrderedDict()
         for file in files:
             aor = file.split('-ch')[0]
             if aor_list is not None:
@@ -1504,7 +1506,35 @@ class IracPSF(object):
             return hdul
         else:
             return new_header, expt, nexp
-            
+
+def warp_catalog(transform, xy, image, center=None):
+    
+    from skimage.transform import SimilarityTransform, warp, rotate
+    
+    trans = transform[0:2]
+    if len(transform) > 2:
+        rot = transform[2]
+        if len(transform) > 3:
+            scale = transform[3]
+        else:
+            scale = 1.
+    else:
+        rot = 0.
+        scale = 1.
+        
+    if center is None:
+        center = np.array(image.shape)/2.-1
+        
+    
+    tf_rscale = SimilarityTransform(translation=trans/scale, rotation=None, scale=scale)
+    shifted = tf_rscale(xy)
+    
+    tf_rot = SimilarityTransform(translation=[0, 0], rotation=-rot/180*np.pi, 
+                                 scale=1)
+    rotated = tf_rot(shifted-center)+center
+    
+    return rotated
+    
 def warp_image(transform, image, warp_args={'order': 3, 'mode': 'constant', 'cval': 0.0}, center=None):
     
     from skimage.transform import SimilarityTransform, warp, rotate
