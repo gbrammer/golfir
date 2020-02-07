@@ -491,7 +491,8 @@ class ImageModeler(object):
         """
         from golfir import irac
         
-        ids = np.unique(self.patch_seg)[1:]
+        hst_slice = self.hst_ujy[self.hst_sly, self.hst_slx]
+        ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
 
         if (self.phot['number'][ids-1] - ids).sum() == 0:
             mtest = self.phot['mag_auto'][ids-1] < mag_limit
@@ -525,7 +526,6 @@ class ImageModeler(object):
         xy_offset = xy_warp - patch_xy
                     
         _A = []
-        hst_slice = self.hst_ujy[self.hst_sly, self.hst_slx]
         for i, id in tqdm(enumerate(ids)):
             #print(i, id)
             ix = phot['number'] == id
@@ -1039,7 +1039,7 @@ class ImageModeler(object):
         
         try:
             
-            gf_root = f'gf-{self.root}-{self.lores_filter}'
+            gf_root = f'gf{self.patch_id}{self.lores_filter}'
             gf = _fitter.fit_arrays(sci_cleaned, ivar*segmap, segmap*1, 
                                 galfit_psf, psf_sample=1, id=1, 
                                 components=components, recenter=False, 
@@ -1075,13 +1075,13 @@ class ImageModeler(object):
         # Component imaage
         cwd = os.getcwd()
         #os.chdir('/tmp/')
-        gf_root = f'gf-{self.root}-{self.lores_filter}'
+        gf_root = f'gf{self.patch_id}{self.lores_filter}'
         
         os.system(f'perl -pi -e "s/P\) 0/P\) 3/" {gf_root}.gfmodel')
         os.system(f'galfit {gf_root}.gfmodel')
         im = pyfits.open('subcomps.fits')
         
-        os.chdir(cwd)
+        #os.chdir(cwd)
 
         for i, id in enumerate(self.galfit_fit_ids):
             gf_model = im[i+2].data.flatten()
@@ -1445,6 +1445,10 @@ def run_all_patches(root, **kwargs):
     """
     Generate and run all patches
     """
+    if False:
+        ds9 = None
+        kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17} 
+        
     for ch in ['ch1', 'ch2']:
         self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
         
@@ -1460,5 +1464,9 @@ def run_all_patches(root, **kwargs):
             
         N = len(tab)
         for i in range(N):
-            rd_patch = (tab['ra'][i], tab['dec'][i])
-            self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
+            try:
+                rd_patch = (tab['ra'][i], tab['dec'][i])
+                self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
+            except:
+                pass
+                
