@@ -1388,9 +1388,10 @@ class ImageModeler(object):
             # Error scaling
             self.compute_err_scale()  
             
-            ds9.frame(18)
-            ds9.view(self.patch_resid*self.patch_mask,
-                     header=self.patch_header)
+            if ds9:
+                ds9.frame(18)
+                ds9.view(self.patch_resid*self.patch_mask,
+                         header=self.patch_header)
                                 
             
         # Save diagnostic figure
