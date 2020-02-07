@@ -281,10 +281,10 @@ class ImageModeler(object):
             irac_psf_obj = irac.IracPSF(ch=int(filter[-1]), scale=0.1, verbose=self.verbose, avg_psf=avg_psf)
 
             self.ERR_SCALE = 1.
-            if os.path.exists('{0}-{1}.cat.fits'.format(self.root, filter)):
-                ir_tab = grizli.utils.read_catalog('{0}-ch{1}.cat.fits'.format(self.root, filter))
-                if 'ERR_SCALE' in ir_tab.meta:
-                    self.ERR_SCALE = ir_tab.meta['ERR_SCALE']
+            # if os.path.exists('{0}-{1}.cat.fits'.format(self.root, filter)):
+            #     ir_tab = grizli.utils.read_catalog('{0}-ch{1}.cat.fits'.format(self.root, filter))
+            #     if 'ERR_SCALE' in ir_tab.meta:
+            #         self.ERR_SCALE = ir_tab.meta['ERR_SCALE']
 
             # Integer ratio of pixel sizes between IRAC and HST
             try:
