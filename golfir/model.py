@@ -1338,6 +1338,7 @@ class ImageModeler(object):
             # 
             fit_bright = self.patch_obj_coeffs > galfit_flux_limit
             fit_bright &= (~self.patch_ids_in_border)
+            fit_bright &= (~self.patch_is_bright)
             
             so = np.argsort(self.patch_obj_coeffs[fit_bright])[::-1]
             bright_ids = self.patch_ids[fit_bright][so]
@@ -1448,6 +1449,14 @@ def run_all_patches(root, **kwargs):
     if False:
         ds9 = None
         kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17} 
+    
+    if False:
+        os.chdir('/Users/gbrammer/Research/HST/CHArGE/IRAC/')
+        if not os.path.exists(root):
+            os.mkdir(root)
+        
+        os.chdir(root)
+        golfir.model.ImageModeler.fetch_from_aws(root)
         
     for ch in ['ch1', 'ch2']:
         self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
