@@ -523,7 +523,7 @@ class IracAOR():
         med_wcs = pywcs.WCS(med_hdu.header)
         med_wcs.pscale = pixel_scale
         
-        med_data = np.zeros((self.N, sh[0], sh[1]))
+        med_data = np.zeros((self.N, sh[0], sh[1]), dtype=np.float32)
         for i in range(self.N):
             drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point')
             med_data[i,:,:] = drz[0]
@@ -705,7 +705,7 @@ class IracAOR():
     def get_all_psfs(self, psf_coords=None, func=get_bcd_psf):
         
         ra, dec = psf_coords
-        full_psf = np.zeros((self.N, 256, 256))
+        full_psf = np.zeros((self.N, 256, 256), dtype=np.float32)
         channel = int(self.channel[-1])
         for i in range(self.N):
             full_psf[i,:,:] = func(ra=ra, dec=dec, wcs=self.wcs[i],
@@ -972,7 +972,8 @@ def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0
     for aor in aors:
         
         ### GAIA positions
-        gaia = utils.read_catalog('{0}-{1}_gaia.radec'.format(aor, label))
+        gaia_file = glob.glob('{0}-{1}_gaia*.radec'.format(aor, label))[0]
+        gaia = utils.read_catalog(gaia_file)
         idx, dr = gaia.match_to_catalog_sky(cat)
         has_gaia = dr < 1*u.arcsec
         dd = gaia['dec'][idx] - cat['dec']
