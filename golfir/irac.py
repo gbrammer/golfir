@@ -557,14 +557,14 @@ class IracAOR():
         
             return med_wcs, med.data
         
-        def blot(self, med_wcs, med, interp='poly5'):
-            from drizzlepac.astrodrizzle import ablot
-        
-            blot_data = np.zeros(self.cbcd.shape, dtype=np.float32)
-            for i in range(self.N):
-                blot_data[i,:,:] = ablot.do_blot(med.astype(np.float32), med_wcs, self.shift_wcs[i], 1, coeffs=True, interp=interp, sinscl=1.0, stepsize=10, wcsmap=None)
-        
-            return blot_data
+    def blot(self, med_wcs, med, interp='poly5'):
+        from drizzlepac.astrodrizzle import ablot
+    
+        blot_data = np.zeros(self.cbcd.shape, dtype=np.float32)
+        for i in range(self.N):
+            blot_data[i,:,:] = ablot.do_blot(med.astype(np.float32), med_wcs, self.shift_wcs[i], 1, coeffs=True, interp=interp, sinscl=1.0, stepsize=10, wcsmap=None)
+    
+        return blot_data
         
     def get_shifts(self, threshold=0.8, ref=None, use_triangles=False):
         import astropy.units as u
