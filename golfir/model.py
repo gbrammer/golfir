@@ -158,7 +158,7 @@ class ImageModeler(object):
         if f'{self.root}-{prefer_filter}_drz_sci.fits' in ref_files:
             ref_file = f'{self.root}-{prefer_filter}_drz_sci.fits'
         else:
-            ref_file = ref_file[-1]
+            ref_file = ref_files[-1]
         
         grizli.utils.log_comment(self.LOGFILE, 
                f'Use HST reference image "{ref_file}".', verbose=self.verbose, 
@@ -1412,6 +1412,11 @@ class ImageModeler(object):
         step = (2*patch_arcmin-patch_overlap)*60/0.5
         
         valid = np.isfinite(self.phot['mag_auto'])
+        
+        if patch_arcmin < 0:
+            size = 0.
+            pad = 10
+            
         xmin = np.maximum(self.lores_xy[valid,0].min()+size-extra, pad)
         xmax = np.minimum(self.lores_xy[valid,0].max(),  
                           self.lores_shape[1]-pad)
@@ -1420,9 +1425,20 @@ class ImageModeler(object):
         ymax = np.minimum(self.lores_xy[valid,1].max(), 
                           self.lores_shape[0]-pad)
         
-        xp, yp = np.meshgrid(np.arange(xmin, xmax+size, step), np.arange(ymin, ymax+size, step))
+        if patch_arcmin < 0:
+            # Single patch
+            xp = np.array([(xmax + xmin)/2.])
+            yp = np.array([(ymax + ymin)/2.])
+            
+            rp, dp = self.lores_wcs.all_pix2world(xp[:1].flatten(), yp[:1].flatten(), 0)
+            
+            cosd = np.cos(dp[0]/180*np.pi)
+            patch_arcmin = np.maximum((xmax-xmin)*cosd*60, (ymax-ymin)*60)
+            
+        else:    
+            xp, yp = np.meshgrid(np.arange(xmin, xmax+size, step), np.arange(ymin, ymax+size, step))
         
-        rp, dp = self.lores_wcs.all_pix2world(xp.flatten(), yp.flatten(), 0)
+            rp, dp = self.lores_wcs.all_pix2world(xp.flatten(), yp.flatten(), 0)
         
         patch_ids = np.arange(len(rp))
         
@@ -1446,6 +1462,9 @@ def run_all_patches(root, **kwargs):
     """
     Generate and run all patches
     """
+    import golfir.model
+    import os
+    
     if False:
         ds9 = None
         kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17} 
