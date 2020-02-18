@@ -369,6 +369,7 @@ def redrizzle_mosaics(cat_kwargs={}):
         pyfits.writeto('{0}_drz_wht.fits'.format(out_root), data=_drz[1]*wht_scl, header=header, clobber=True, output_verify='fix')
         
         if _drz[0].max() == 0:
+            print('Empty mosaic: {0}'.format(out_root))
             continue
             
         bkg_params={'bw': 128, 'bh': 128, 'fw': 3, 'fh': 3, 'pixel_scale':0.1}
