@@ -70,7 +70,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
             
         if run_alignment: # & (instrument == 'irac'):
             try:
-                aors[aor].align_to_reference(reference=['GAIA'], radec=radec, 
+                aors[aor].align_to_reference(reference=['GAIA','GAIA_Vizier'], radec=radec, 
                                              threshold=align_threshold)
             except:
                 # fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
@@ -771,7 +771,7 @@ class IracAOR():
         
         return sci, wht, ctx, head, w
     
-    def align_to_reference(self, reference=['GAIA','PS1'], radec=None, kernel='square', pixfrac=0.8, threshold=3, assume_close=True):
+    def align_to_reference(self, reference=['GAIA','GAIA_Vizier','PS1'], radec=None, kernel='square', pixfrac=0.8, threshold=3, assume_close=True):
         from grizli import prep
         import astropy.units as u
         from drizzlepac import updatehdr
