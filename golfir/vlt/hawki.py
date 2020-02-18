@@ -999,8 +999,12 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         d0 = h0['DEC']
     
         # GAIA catalog
-        gaia = prep.get_gaia_DR2_catalog(ra=r0, dec=d0, radius=8, use_mirror=False, output_file='{0}-gaia.fits'.format(ob_root)) 
-    
+        try:
+            gaia = prep.get_gaia_DR2_catalog(ra=r0, dec=d0, radius=8, use_mirror=False, output_file='{0}-gaia.fits'.format(ob_root)) 
+        except:
+            gaia = prep.get_gaia_DR2_vizier(ra=r0, dec=d0, radius=8) 
+            gaia.write('{0}-gaia.fits'.format(ob_root), overwrite=True)
+                        
         t0 = Time(sci[0].header['DATE'].replace('T',' '))
         gaia_pm =  prep.get_gaia_radec_at_time(gaia, date=t0.decimalyear, format='decimalyear')
         ok = np.isfinite(gaia_pm.ra)
