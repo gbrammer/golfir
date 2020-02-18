@@ -291,8 +291,10 @@ def flat_gradient():
         f = np.mean(np.array(flats), axis=0)
         pyfits.writeto('flat_gradient-{0}.fits'.format(ext), data=f, overwrite=True)
         
-def redrizzle_mosaics(cat_kwargs={}):
-    
+def redrizzle_mosaics(cat_kwargs={}, pad=60):
+    """
+    Redrizzle mosaic with padding
+    """
     if 'Process2020' in os.getcwd():
         ref_image = 'hff-j001408m3023-f160w_drz_sci.fits.gz'
         root = 'a2744-test'
@@ -305,10 +307,24 @@ def redrizzle_mosaics(cat_kwargs={}):
         root = f'{field}-ks'
         
     ref = pyfits.open(ref_image)
-    ref_wcs = pywcs.WCS(ref[0].header, relax=True)
+    
+    sh = ref[0].data.shape
+    ref_header = ref[0].header.copy()
+    
+    if pad > 0:
+        ref_wcs = pywcs.WCS(ref_header, relax=True)
+        ref_wcs.pscale = utils.get_wcs_pscale(ref_wcs)
+
+        pad_pix = int(np.round(pad/ref_wcs.pscale))
+        ref_header['NAXIS1'] += 2*pad_pix
+        ref_header['NAXIS2'] += 2*pad_pix
+        ref_header['CRPIX1'] += pad_pix
+        ref_header['CRPIX2'] += pad_pix
+
+    ref_wcs = pywcs.WCS(ref_header, relax=True)
     ref_wcs.pscale = utils.get_wcs_pscale(ref_wcs)
     
-    if True:
+    if False:
         ref_header, ref_wcs = utils.make_maximal_wcs([ref_wcs], pixel_scale=0.1, theta=0, pad=60, get_hdu=False, verbose=True)
     
     xfiles = glob.glob('*.flat.masked.fits')
