@@ -291,7 +291,7 @@ def flat_gradient():
         f = np.mean(np.array(flats), axis=0)
         pyfits.writeto('flat_gradient-{0}.fits'.format(ext), data=f, overwrite=True)
         
-def redrizzle_mosaics():
+def redrizzle_mosaics(cat_kwargs={}):
     
     if 'Process2020' in os.getcwd():
         ref_image = 'hff-j001408m3023-f160w_drz_sci.fits.gz'
@@ -367,16 +367,19 @@ def redrizzle_mosaics():
         print('Write')
         pyfits.writeto('{0}_drz_sci.fits'.format(out_root), data=_drz[0]*sci_scl, header=header, clobber=True, output_verify='fix')
         pyfits.writeto('{0}_drz_wht.fits'.format(out_root), data=_drz[1]*wht_scl, header=header, clobber=True, output_verify='fix')
-
+        
+        if _drz[0].max() == 0:
+            continue
+            
         bkg_params={'bw': 128, 'bh': 128, 'fw': 3, 'fh': 3, 'pixel_scale':0.1}
 
-        cat = prep.make_SEP_catalog(out_root, threshold=1.2, column_case=str.lower, bkg_params=bkg_params)
+        cat = prep.make_SEP_catalog(out_root, threshold=1.2, column_case=str.lower, bkg_params=bkg_params, **cat_kwargs)
         
         # Masked background
         seg = pyfits.open('{0}_seg.fits'.format(out_root))
         seg_mask = seg[0].data > 0
 
-        cat = prep.make_SEP_catalog(out_root, threshold=1.4, column_case=str.lower, bkg_params=bkg_params, bkg_mask=seg_mask)
+        cat = prep.make_SEP_catalog(out_root, threshold=1.4, column_case=str.lower, bkg_params=bkg_params, bkg_mask=seg_mask, **cat_kwargs)
         
     # Combined    
     # query vizier for VISTA surveys
