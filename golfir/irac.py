@@ -511,7 +511,7 @@ class IracAOR():
         theta = np.arctan(dx[0,0]/dx[0,1])
         return theta
     
-    def make_median_image(self, pixel_scale=None, extra_mask=None):
+    def make_median_image(self, pixel_scale=None, extra_mask=None, sigma_clip=20, max_size=50e6):
         
         if pixel_scale is None:
             pixel_scale = self.wcs[0].pscale
@@ -523,25 +523,48 @@ class IracAOR():
         med_wcs = pywcs.WCS(med_hdu.header)
         med_wcs.pscale = pixel_scale
         
-        med_data = np.zeros((self.N, sh[0], sh[1]), dtype=np.float32)
-        for i in range(self.N):
-            drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point')
-            med_data[i,:,:] = drz[0]
+        NPIX = self.N*sh[0]*sh[1]
+        if NPIX > max_size:
+            print('NPIX = {0:.1f}M, use sigma-clipped'.format(NPIX/1e6))
+            
+            # Sigma-clipped drizzle
+            for i in range(self.N):
+                drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point', verbose=False)
+                
+                if i == 0:
+                    med_data = drz[0]*1
+                    med_n = (drz[1] > 0)*1
+                    continue
+                    
+                # CR in new image
+                keep = (drz[1] > 0) & ((drz[0] - med_data)*np.sqrt(drz[1]) < sigma_clip)
+                med_data = med_data*med_n + drz[0]*keep
+                med_n += keep*1
+                med_data /= np.maximum(med_n, 1)
+            
+            return med_wcs, med_data
+                
+        else:
+            med_data = np.zeros((self.N, sh[0], sh[1]), dtype=np.float32)
         
-        med_ma = np.ma.masked_array(med_data, mask=med_data == 0)
+            for i in range(self.N):
+                drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point')
+                med_data[i,:,:] = drz[0]
+        
+            med_ma = np.ma.masked_array(med_data, mask=med_data == 0)
          
-        med = np.ma.median(med_ma[self.nskip:,:,:], axis=0)
+            med = np.ma.median(med_ma[self.nskip:,:,:], axis=0)
         
-        return med_wcs, med.data
+            return med_wcs, med.data
         
-    def blot(self, med_wcs, med, interp='poly5'):
-        from drizzlepac.astrodrizzle import ablot
+        def blot(self, med_wcs, med, interp='poly5'):
+            from drizzlepac.astrodrizzle import ablot
         
-        blot_data = np.zeros(self.cbcd.shape, dtype=np.float32)
-        for i in range(self.N):
-            blot_data[i,:,:] = ablot.do_blot(med.astype(np.float32), med_wcs, self.shift_wcs[i], 1, coeffs=True, interp=interp, sinscl=1.0, stepsize=10, wcsmap=None)
+            blot_data = np.zeros(self.cbcd.shape, dtype=np.float32)
+            for i in range(self.N):
+                blot_data[i,:,:] = ablot.do_blot(med.astype(np.float32), med_wcs, self.shift_wcs[i], 1, coeffs=True, interp=interp, sinscl=1.0, stepsize=10, wcsmap=None)
         
-        return blot_data
+            return blot_data
         
     def get_shifts(self, threshold=0.8, ref=None, use_triangles=False):
         import astropy.units as u
