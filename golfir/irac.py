@@ -17,7 +17,7 @@ import astropy.units as u
 
 from grizli import utils, prep
 
-def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True):
+def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True):
     """
     """
     import glob
@@ -69,9 +69,10 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
             pop_list.append(aor)
             
         if run_alignment: # & (instrument == 'irac'):
-            try:
-                aors[aor].align_to_reference(reference=['GAIA','GAIA_Vizier'], radec=radec, 
-                                             threshold=align_threshold)
+            try:                
+                aors[aor].align_to_reference(reference=['GAIA','GAIA_Vizier'],
+                                      radec=radec, threshold=align_threshold,
+                                      assume_close=assume_close)
             except:
                 # fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
                 # fp.write(time.ctime())
