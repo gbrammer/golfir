@@ -244,17 +244,39 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     plt.ioff()
     files = glob.glob(f'{root}-00-ch*sci.fits')
     files.sort()
-
-    fig = plt.figure(figsize=[14, 7])
-    for i, file in enumerate(files[:2]):
+    
+    if len(files) == 1:
+        subs = 1,1
+        fs = [7,7]
+    elif len(files) == 2:
+        subs = 1,2
+        fs = [14,7]
+    elif len(files) == 3:
+        subs = 2,2
+        fs = [14,14]
+    else:
+        subs = 2,2
+        fs = [14,14]
+        
+    fig = plt.figure(figsize=fs)
+    for i, file in enumerate(files[:4]):
         im = pyfits.open(file)
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
-        ax = fig.add_subplot(1,2,1+i)
+        ax = fig.add_subplot(subs[0], subs[1], 1+i)
         ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
 
-    fig.axes[1].set_yticklabels([])
+    if len(files) > 1:
+        fig.axes[1].set_yticklabels([])
+    
+    if len(files) > 2:
+        fig.axes[0].set_xticklabels([])
+        fig.axes[1].set_xticklabels([])
+    
+    if len(files) > 3:
+        fig.axes[3].set_yticklabels([])
+        
     fig.tight_layout(pad=0.5)
     fig.savefig(f'{root}.init.png')
     plt.close('all')
@@ -495,19 +517,42 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     plt.ioff()
     files = glob.glob(f'{root}-ch*sci.fits')
     files.sort()
-
-    fig = plt.figure(figsize=[14, 7])
+    
+    if len(files) == 1:
+        subs = 1,1
+        fs = [7,7]
+    elif len(files) == 2:
+        subs = 1,2
+        fs = [14,7]
+    elif len(files) == 3:
+        subs = 2,2
+        fs = [14,14]
+    else:
+        subs = 2,2
+        fs = [14,14]
+        
+    fig = plt.figure(figsize=fs)
     for i, file in enumerate(files[:2]):
         im = pyfits.open(file)
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
-        ax = fig.add_subplot(1,2,1+i)
+        ax = fig.add_subplot(subs[0], subs[1], 1+i)
         scl = (final_pix/initial_pix)**2
         ax.imshow(im[0].data, vmin=-0.1*scl, vmax=1*scl, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
+
+        fig.axes[1].set_yticklabels([])
+
+    if len(files) > 1:
+        fig.axes[1].set_yticklabels([])
     
-    fig.axes[1].set_yticklabels([])
+    if len(files) > 2:
+        fig.axes[0].set_xticklabels([])
+        fig.axes[1].set_xticklabels([])
     
+    if len(files) > 3:
+        fig.axes[3].set_yticklabels([])
+        
     fig.tight_layout(pad=0.5)
     fig.savefig(f'{root}.final.png')
     plt.close('all')
