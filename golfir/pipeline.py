@@ -532,7 +532,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         fs = [14,14]
         
     fig = plt.figure(figsize=fs)
-    for i, file in enumerate(files[:2]):
+    for i, file in enumerate(files[:4]):
         im = pyfits.open(file)
         print('{0} {1} {2:.1f} s'.format(file, im[0].header['FILTER'], im[0].header['EXPTIME']))
         ax = fig.add_subplot(subs[0], subs[1], 1+i)
