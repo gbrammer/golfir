@@ -541,8 +541,6 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
 
-        fig.axes[1].set_yticklabels([])
-
     if len(files) > 1:
         fig.axes[1].set_yticklabels([])
     
