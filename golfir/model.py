@@ -146,6 +146,16 @@ class ImageModeler(object):
                    ' --include "j*phot.fits"')
         
         os.system('gunzip *drz*fits.gz *seg.fits.gz')
+        
+        # Need ACS?
+        wfc_files = glob.glob('j*-f1*sci.fits')
+        if len(wfc_files) == 0:
+            os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./'
+                       ' --exclude "*"'
+                       ' --include "j*-f[678]*_[sw]??.fits.gz"')
+
+            os.system('gunzip *_dr*fits.gz *seg.fits.gz')
+            
         if not os.path.exists(f'{root}_irac_phot.fits'):
             os.system(f'cp {root}_phot.fits {root}_irac_phot.fits')
             
@@ -155,6 +165,10 @@ class ImageModeler(object):
         """
         ref_files = glob.glob('{0}-f1*_drz_sci.fits'.format(self.root))
         ref_files.sort()
+        if len(ref_files) == 0:
+            ref_files = glob.glob('{0}-ir*_dr*_sci.fits'.format(self.root))
+            ref_files.sort()
+            
         if f'{self.root}-{prefer_filter}_drz_sci.fits' in ref_files:
             ref_file = f'{self.root}-{prefer_filter}_drz_sci.fits'
         else:

@@ -67,7 +67,11 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         out_hdu = utils.make_maximal_wcs(wcslist, pixel_scale=initial_pix, theta=0, pad=5, get_hdu=True, verbose=True)
 
         # Make sure pixels align
-        ref_file = glob.glob('{0}-f1*_drz_sci.fits.gz'.format(root))[-1]
+        ref_file = glob.glob('{0}-f[01]*_drz_sci.fits.gz'.format(root))
+        if len(ref_file) == 0:
+            ref_file = glob.glob('{0}-f[678]*_dr*_sci.fits.gz'.format(root))
+        
+        ref_file = ref_file[-1]
 
         print(f'\nHST reference image: {ref_file}\n')
 
