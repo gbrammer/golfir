@@ -1490,7 +1490,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
     
     import grizli.utils
     import golfir.model
-        
+    
     if True:
         try:
             os.chdir(PATH)
@@ -1531,6 +1531,12 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
         kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17, 'bkg_kwargs':{'order_npix':64}} 
     else:
         kwargs['ds9'] = ds9
+    
+    # Galfit not working on AWS
+    if os.path.exists('/home/ec2-user'):
+        kwargs['galfit_flux_limit'] = None
+        kwargs['refine_brightest'] = False
+        
             
     for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
         try:
