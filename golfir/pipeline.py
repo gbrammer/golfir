@@ -242,7 +242,11 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     ####
     ## Show the initial product
     plt.ioff()
-    files = glob.glob(f'{root}-00-ch*sci.fits')
+    for i in range(10):
+        files = glob.glob(f'{root}-{i:02d}-ch*sci.fits')
+        if len(files) > 0:
+            break
+            
     files.sort()
     
     if len(files) == 1:
@@ -390,7 +394,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             
         ##############
         # Bright stars for pulldown correction
-        ph = utils.read_catalog('{0}-00-{1}.cat.fits'.format(root, ch)) 
+        cat_file = glob.glob(f'{root}-[0-9][0-9]-{ch}.cat.fits')[0]
+        ph = utils.read_catalog(cat_file) 
         bright = (ph['mag_auto'] < pulldown_mag) # & (ph['flux_radius'] < 3)
         ph = ph[bright]
 

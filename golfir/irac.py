@@ -1151,6 +1151,9 @@ class ModelPSF(object):
         self.output_scale = output_scale
         self.rmax = rmax
         
+        if 'amplitude' in model.param_names:
+            model.fixed['amplitude'] = 1.
+            
         init_model_attr(model)
         self.model = model
         self.initialize_output(rmax=rmax, output_scale=output_scale)
@@ -1243,13 +1246,13 @@ class ModelPSF(object):
         x0 = self.theta / self.theta_scale
         
         args = (self, cutout)
-        minimize(self._objective_function_psf, x0, args=args, **minimize_kwargs)
+        _x = minimize(self._objective_function_psf, x0, args=args, **minimize_kwargs)
         #minimize(_objective_function_psf, x0, args=args, **minimize_kwargs)
         
-        model = self.evaluate_psf(rmax=self.rmax)
-        a = (model*cutout).sum()/(model**2).sum()
-        resid = cutout - model*a
-        
+        # model, _, _ = self.evaluate_psf(rmax=self.rmax)
+        # a = (model*cutout).sum()/(model**2).sum()
+        # resid = cutout - model*a
+        # 
     @staticmethod
     def _objective_function_psf(theta_scl, psf, cutout):
         

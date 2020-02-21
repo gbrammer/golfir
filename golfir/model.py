@@ -241,7 +241,7 @@ class ImageModeler(object):
         waterseg[waterseg == 0] = self.hst_seg.data[waterseg == 0]
         self.waterseg = waterseg
         
-    def read_lores_data(self, filter='ch1', use_avg_psf=True):
+    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None):
         """
         Read low-res (e.g., IRAC)
         """
@@ -253,7 +253,7 @@ class ImageModeler(object):
         
         ################
         # Parameters for IRAC fitting
-        if use_avg_psf & (filter not in ['mips1']):
+        if use_avg_psf & (filter in ['ch1','ch2','ch3','ch4']):
             avg_psf = pyfits.open('{0}-{1}-0.1.psfr_avg.fits'.format(self.root, filter))[0].data
         else:
             avg_psf = None
@@ -275,7 +275,7 @@ class ImageModeler(object):
             #ERR_SCALE = 0.1828 # From residuals
             self.ERR_SCALE = 1.
 
-        else:
+        elif filter in ['ch1','ch2','ch3','ch4']:
             irac_im = pyfits.open('{0}-{1}_drz_sci.fits'.format(self.root, filter))[0]
             irac_wht = pyfits.open('{0}-{1}_drz_wht.fits'.format(self.root, filter))[0].data
             irac_psf_obj = irac.IracPSF(ch=int(filter[-1]), scale=0.1, verbose=self.verbose, avg_psf=avg_psf)
@@ -290,7 +290,7 @@ class ImageModeler(object):
             try:
                 irac_wcs = pywcs.WCS(irac_im.header)
                 irac_wcs.pscale = utils.get_wcs_pscale(irac_wcs)
-                pf = int(np.round(irac_wcs.pscale/0.1))
+                pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
             except:
                 pf = 5
 
@@ -302,14 +302,29 @@ class ImageModeler(object):
                                         
             self.phot[f'{self.column_root}_nexp'] = nexp
             self.phot[f'{self.column_root}_exptime'] = expt
+        
+        else:
+            
+            irac_im = pyfits.open('{0}-{1}_drz_sci.fits'.format(self.root, filter))[0]
+            irac_wht = pyfits.open('{0}-{1}_drz_wht.fits'.format(self.root, filter))[0].data
+            self.ERR_SCALE = 1.
+            self.column_root = filter
+            
+            irac_wcs = pywcs.WCS(irac_im.header)
+            irac_wcs.pscale = utils.get_wcs_pscale(irac_wcs)
+            pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
             
         if f'{self.column_root}_flux' not in self.phot.colnames:
             self.phot[f'{self.column_root}_flux'] = -99.
             self.phot[f'{self.column_root}_err'] = -99.
             self.phot[f'{self.column_root}_patch'] = 0
             self.phot[f'{self.column_root}_bright'] = 0
-    
-        self.lores_psf_obj = irac_psf_obj
+        
+        if psf_obj is None:
+            self.lores_psf_obj = irac_psf_obj
+        else:
+            self.lores_psf_obj = psf_obj
+            
         self.lores_im = irac_im
         self.lores_shape = self.lores_im.data.shape
         self.lores_wht = irac_wht
@@ -360,9 +375,12 @@ class ImageModeler(object):
         
     @property
     def lores_sivar(self):
-        return np.sqrt(self.lores_wht)/self.ERR_SCALE
-    
-    def patch_initialize(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0):
+        if np.isfinite(self.ERR_SCALE):
+            return np.sqrt(self.lores_wht)/self.ERR_SCALE
+        else:
+            return np.sqrt(self.lores_wht)
+            
+    def patch_initialize(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, bkg_kwargs={}):
                 
         self.patch_arcmin = patch_arcmin
         self.patch_npix = int(patch_arcmin*60*10/self.pf)
@@ -403,7 +421,7 @@ class ImageModeler(object):
         self.patch_sci = self.lores_im.data[self.isly, self.islx].flatten()
         self.patch_sivar = (self.lores_sivar[self.isly, self.islx]).flatten()
     
-        self.patch_set_background()
+        self.patch_set_background(**bkg_kwargs)
         
         self.patch_wcs = self.lores_wcs.slice((self.islx, self.isly))
         self.patch_header = grizli.utils.get_wcs_slice_header(self.lores_wcs, 
@@ -1291,7 +1309,7 @@ class ImageModeler(object):
         self.comp_hdu.writeto(component_file, overwrite=True)
                 
 
-    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, **kwargs):
+    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, **kwargs):
         """
         Run the multi-step process on a single patch
         """
@@ -1303,21 +1321,23 @@ class ImageModeler(object):
             self.run_full_patch(rd_patch=None, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id, mag_limit=mag_limit, galfit_flux_limit=10, match_geometry=False)
             
         # Initialize patch, make cutouts, etc.
-        self.patch_initialize(rd_patch=rd_patch, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id)
+        self.patch_initialize(rd_patch=rd_patch, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id, bkg_kwargs=bkg_kwargs)
         
         # First pass on models
         self.patch_compute_models(mag_limit=mag_limit[0], use_saved_components=True, **kwargs)
         self.patch_least_squares()
                 
         # Alignment
-        self.patch_align()
+        if run_alignment:
+            self.patch_align()
         
-        if ds9:
-            self.patch_display(ds9=ds9)
+            if ds9:
+                self.patch_display(ds9=ds9)
         
-        # Regenerate models with alignment transform
-        self.patch_compute_models(mag_limit=mag_limit[1], **self.bright_args)
-        self.patch_least_squares()
+                # Regenerate models with alignment transform
+                self.patch_compute_models(mag_limit=mag_limit[1],
+                                          **self.bright_args)
+                self.patch_least_squares()
         
         # Error scaling
         self.compute_err_scale()  
@@ -1458,28 +1478,64 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
         
-def run_all_patches(root, **kwargs):
+def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, **kwargs):
     """
     Generate and run all patches
     """
-    import golfir.model
     import os
+    import glob
+    import time
     
-    if False:
-        ds9 = None
-        kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17} 
-    
-    if False:
-        os.chdir('/Users/gbrammer/Research/HST/CHArGE/IRAC/')
+    import grizli.utils
+    import golfir.model
+        
+    if True:
+        try:
+            os.chdir(PATH)
+        except:
+            os.chdir('/Users/gbrammer/Research/HST/CHArGE/IRAC/')
+            
         if not os.path.exists(root):
             os.mkdir(root)
         
         os.chdir(root)
         golfir.model.ImageModeler.fetch_from_aws(root)
         
-    for ch in ['ch1', 'ch2']:
-        self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
-        
+    try:
+        _ = ds9
+    except:
+        ds9 = None
+            
+    if ds9:
+        ds9.frame(1)
+        ds9.set(f'file {root}-ir_drz_sci.fits')
+        ds9.set_defaults(match='wcs')
+        ds9.frame(2)
+        ds9.set(f'file {root}-ir_seg.fits')
+        ds9.frame(3)
+        ds9.set(f'file {root}-ch1_drz_sci.fits')
+        ds9.frame(4)
+        ds9.set(f'file {root}-ch2_drz_sci.fits')
+
+        ds9.set('frame lock wcs')
+        ds9.set('lock colorbar')
+
+        from grizli.pipeline import auto_script
+        auto_script.field_rgb(root, HOME_PATH=None, ds9=ds9, scale_ab=23)
+        ds9.set('rgb lock colorbar')
+                    
+    if False:
+        ds9 = None
+        kwargs = {'ds9':ds9, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17, 'bkg_kwargs':{'order_npix':64}} 
+    else:
+        kwargs['ds9'] = ds9
+            
+    for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
+        try:
+            self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
+        except:
+            pass
+            
         patch_file = f'{self.root}_patch.fits'
         if os.path.exists(patch_file):
             tab = grizli.utils.read_catalog(patch_file)
@@ -1494,7 +1550,56 @@ def run_all_patches(root, **kwargs):
         for i in range(N):
             try:
                 rd_patch = (tab['ra'][i], tab['dec'][i])
+                if ch > 'ch2':
+                    kwargs['galfit_flux_limit'] = 100
+                    
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
             except:
                 pass
-                
+    
+    # Add to HTML
+    resid_images = glob.glob(f"{root}_*_*png")
+    if len(resid_images) > 0:
+        resid_images.sort()
+        
+        fp = open(f'{root}.irac.html','a')
+        fp.write(f'\n\n<h2> Model ({time.ctime()})</h2>')
+        
+        extra = glob.glob(f'{root}_irac_phot.fits')
+        extra += glob.glob(f'{root}*model.fits')
+        extra += glob.glob(f'{root}*patch*')
+        extra += glob.glob(f'{root}*components.fits')
+        extra.sort()
+        if len(extra) > 0:
+            extra.sort()
+            fp.write('\n<pre>')
+            for file in extra:
+                fp.write(f'\n<a href={file}>{file}</a>')
+            fp.write('\n</pre>')
+            
+        for resid in resid_images:
+            fp.write(f'\n<br><tt>{resid}</tt>')
+            fp.write(f'\n<br><a href="{resid}"><img src="{resid}" height=200px /> </a>')
+        
+        fp.close()
+        
+    # Sync
+    os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/ '
+              f' --exclude "*" --include "{root}*model.fits"'
+              f' --include "{root}*irac*phot.fits"'
+              f' --include "{root}*components.fits"'
+              f' --include "{root}_*_*png"'
+              f' --include "{root}*patch*"'
+              f' --include "{root}.irac.html"'
+              ' --acl public-read')
+              
+    #########################
+    # Manual position
+    if False:
+        for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
+            try:
+                self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
+            except:
+                pass
+
+            self.run_full_patch(rd_patch=None, patch_id=0, **kwargs)
