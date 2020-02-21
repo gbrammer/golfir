@@ -1477,7 +1477,9 @@ class ImageModeler(object):
         
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
-        
+
+RUN_ALL_DEFAULTS = {'ds9':None, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}} 
+      
 def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, **kwargs):
     """
     Generate and run all patches
