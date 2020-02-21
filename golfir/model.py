@@ -699,7 +699,7 @@ class ImageModeler(object):
                 p_model = _Ap[1:].T.dot(_xp[0])
                 msum = _xp[0].sum()
    
-    def comp_to_patch(self, id):
+    def comp_to_patch(self, id, full_image=False, flatten=True):
         """
         Put a stored component into the patch coordinates
         """    
@@ -708,14 +708,24 @@ class ImageModeler(object):
             return None
         
         hdu = self.comp_hdu[ext]
-        patch = np.zeros(self.patch_shape, dtype=np.float32)
-        ll = self.patch_ll
+        if full_image:
+            patch = np.zeros(self.lores_shape, dtype=np.float32)
+            ll = [0,0]
+        else:
+            patch = np.zeros(self.patch_shape, dtype=np.float32)
+            ll = self.patch_ll
+        
         slx = slice(hdu.header['XMIN']-ll[0], hdu.header['XMAX']-ll[0])
         sly = slice(hdu.header['YMIN']-ll[1], hdu.header['YMAX']-ll[1])
         try:
             patch[sly, slx] += hdu.data
-            return patch.flatten()
+            if flatten:
+                return patch.flatten()
+            else:
+                return patch
+                
         except:
+            print(f'comp_to_patch({id}) failed')
             return None
             
     def patch_bright_limits(self, any_limit=12, point_limit=16, point_flux_radius=3.5, bright_ids=None, bright_sn=7, **kwargs):
@@ -800,7 +810,7 @@ class ImageModeler(object):
         # Update patch_sivaar (property lores_sivar includes ERR_SCALE)
         self.patch_sivar = (self.lores_sivar[self.isly, self.islx]).flatten()
                 
-    def patch_display(self, ds9=None, figsize=[10,10], subplots=220, savefig='png', cmap='Spectral_r', vm=(-0.03, 0.4), horizontal=True):
+    def patch_display(self, ds9=None, figsize=[10,10], subplots=220, savefig='png', cmap='Spectral_r', vm=(-0.03, 0.4), horizontal=False):
         
         if ds9 is not None:
             ds9.frame(12)
@@ -1416,7 +1426,7 @@ class ImageModeler(object):
                                 
             
         # Save diagnostic figure
-        self.patch_display()
+        self.patch_display(ds9=None)
         
         # Save photometry & global model
         self.save_patch_results()
@@ -1534,6 +1544,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
     
     # Galfit not working on AWS
     if os.path.exists('/home/ec2-user'):
+        print('Running on AWS: turn off Galfit')
         kwargs['galfit_flux_limit'] = None
         kwargs['refine_brightest'] = False
         
@@ -1559,8 +1570,12 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
             try:
                 rd_patch = (tab['ra'][i], tab['dec'][i])
                 if ch > 'ch2':
-                    kwargs['galfit_flux_limit'] = 100
-                    
+                    if 'galfit_flux_limit' in kwargs:
+                        if kwargs['galfit_flux_limit'] is not None:
+                            kwargs['galfit_flux_limit'] = 100
+                    else:
+                        kwargs['galfit_flux_limit'] = None
+                        
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
             except:
                 pass
