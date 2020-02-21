@@ -69,6 +69,10 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         # Make sure pixels align
         ref_file = glob.glob('{0}-f[01]*_drz_sci.fits.gz'.format(root))
         if len(ref_file) == 0:
+            os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
+                      f' --exclude "*"'
+                      f' --include "{root}-f[678]*_dr*fits.gz"')
+            
             ref_file = glob.glob('{0}-f[678]*_dr*_sci.fits.gz'.format(root))
         
         ref_file = ref_file[-1]
