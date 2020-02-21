@@ -1334,10 +1334,10 @@ class ImageModeler(object):
             if ds9:
                 self.patch_display(ds9=ds9)
         
-                # Regenerate models with alignment transform
-                self.patch_compute_models(mag_limit=mag_limit[1],
-                                          **self.bright_args)
-                self.patch_least_squares()
+            # Regenerate models with alignment transform
+            self.patch_compute_models(mag_limit=mag_limit[1],
+                                      **self.bright_args)
+            self.patch_least_squares()
         
         # Error scaling
         self.compute_err_scale()  
@@ -1478,9 +1478,9 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
 
-RUN_ALL_DEFAULTS = {'ds9':None, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}} 
+RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}} 
       
-def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, **kwargs):
+def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, **kwargs):
     """
     Generate and run all patches
     """
@@ -1536,7 +1536,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, **kwargs):
         try:
             self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
         except:
-            pass
+            continue
             
         patch_file = f'{self.root}_patch.fits'
         if os.path.exists(patch_file):
@@ -1560,40 +1560,41 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, **kwargs):
                 pass
     
     # Add to HTML
-    resid_images = glob.glob(f"{root}_*_*png")
-    if len(resid_images) > 0:
-        resid_images.sort()
+    if sync_results:
+        resid_images = glob.glob(f"{root}_*_*png")
+        if len(resid_images) > 0:
+            resid_images.sort()
         
-        fp = open(f'{root}.irac.html','a')
-        fp.write(f'\n\n<h2> Model ({time.ctime()})</h2>')
+            fp = open(f'{root}.irac.html','a')
+            fp.write(f'\n\n<h2> Model ({time.ctime()})</h2>')
         
-        extra = glob.glob(f'{root}_irac_phot.fits')
-        extra += glob.glob(f'{root}*model.fits')
-        extra += glob.glob(f'{root}*patch*')
-        extra += glob.glob(f'{root}*components.fits')
-        extra.sort()
-        if len(extra) > 0:
+            extra = glob.glob(f'{root}_irac_phot.fits')
+            extra += glob.glob(f'{root}*model.fits')
+            extra += glob.glob(f'{root}*patch*')
+            extra += glob.glob(f'{root}*components.fits')
             extra.sort()
-            fp.write('\n<pre>')
-            for file in extra:
-                fp.write(f'\n<a href={file}>{file}</a>')
-            fp.write('\n</pre>')
+            if len(extra) > 0:
+                extra.sort()
+                fp.write('\n<pre>')
+                for file in extra:
+                    fp.write(f'\n<a href={file}>{file}</a>')
+                fp.write('\n</pre>')
             
-        for resid in resid_images:
-            fp.write(f'\n<br><tt>{resid}</tt>')
-            fp.write(f'\n<br><a href="{resid}"><img src="{resid}" height=200px /> </a>')
+            for resid in resid_images:
+                fp.write(f'\n<br><tt>{resid}</tt>')
+                fp.write(f'\n<br><a href="{resid}"><img src="{resid}" height=200px /> </a>')
         
-        fp.close()
+            fp.close()
         
-    # Sync
-    os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/ '
-              f' --exclude "*" --include "{root}*model.fits"'
-              f' --include "{root}*irac*phot.fits"'
-              f' --include "{root}*components.fits"'
-              f' --include "{root}_*_*png"'
-              f' --include "{root}*patch*"'
-              f' --include "{root}.irac.html"'
-              ' --acl public-read')
+        # Sync
+        os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/ '
+                  f' --exclude "*" --include "{root}*model.fits"'
+                  f' --include "{root}*irac*phot.fits"'
+                  f' --include "{root}*components.fits"'
+                  f' --include "{root}_*_*png"'
+                  f' --include "{root}*patch*"'
+                  f' --include "{root}.irac.html"'
+                  ' --acl public-read')
               
     #########################
     # Manual position
