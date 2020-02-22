@@ -377,7 +377,12 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         ##############
         # Output WCS based on HST footprint
         if drizzle_ref_file == '':
-            hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
+            try:
+                hst_im = pyfits.open(glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))[-1])
+            except:
+                hst_im = pyfits.open(glob.glob('{0}-f[578]*_dr*sci.fits*'.format(root))[-1])
+            
+    
             hst_wcs = pywcs.WCS(hst_im[0])
             hst_wcs.pscale = utils.get_wcs_pscale(hst_wcs) 
 
