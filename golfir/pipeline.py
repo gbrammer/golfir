@@ -63,7 +63,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     # Define an output WCS aligned in pixel phase to the HST mosaic ()
 
     if not os.path.exists('ref_hdu.fits'):
-        wcslist = get_wcslist(skip=10)
+        wcslist = get_wcslist(skip=-500)
         out_hdu = utils.make_maximal_wcs(wcslist, pixel_scale=initial_pix, theta=0, pad=5, get_hdu=True, verbose=True)
 
         # Make sure pixels align

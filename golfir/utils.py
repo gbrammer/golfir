@@ -78,6 +78,9 @@ def get_wcslist(query='r*', skip=10):
         
     files.sort()
     
+    if skip < 0:
+        skip = int(np.ceil(len(files)/-skip))
+        
     wcslist = []
     for i, file in enumerate(files[::skip]):
         print(i+1, len(files)//skip)
