@@ -80,10 +80,11 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
     
     request_id = None # Restart an earlier request
     
+    os.chdir(dirs[1])
+
     if fetch:
         data_files = eso.retrieve_data(datasets, destination=dirs[1], continuation=True, request_id=request_id)
     
-        os.chdir(dirs[1])
         files = glob.glob('*.Z')
         files.sort()
     
@@ -91,7 +92,7 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
             print(file)
             os.system('gunzip '+file)
     
-        os.chdir('../')
+    os.chdir('../')
     
     os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz .')  
     
