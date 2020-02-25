@@ -26,6 +26,9 @@ def runit(field='', eso=None):
     
     from golfir.vlt import hawki
     
+    if not eso._authenticated:
+        eso.login()
+        
     if field.startswith('hff-'):
         # Run in two steps for global masking
         pass
@@ -42,7 +45,7 @@ def runit(field='', eso=None):
     else:
         print('Problem?')
         
-def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4]):
+def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -77,17 +80,18 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
     
     request_id = None # Restart an earlier request
     
-    data_files = eso.retrieve_data(datasets, destination=dirs[1], continuation=True, request_id=request_id)
+    if fetch:
+        data_files = eso.retrieve_data(datasets, destination=dirs[1], continuation=True, request_id=request_id)
     
-    os.chdir(dirs[1])
-    files = glob.glob('*.Z')
-    files.sort()
+        os.chdir(dirs[1])
+        files = glob.glob('*.Z')
+        files.sort()
     
-    for file in files: 
-        print(file)
-        os.system('gunzip '+file)
+        for file in files: 
+            print(file)
+            os.system('gunzip '+file)
     
-    os.chdir('../')
+        os.chdir('../')
     
     os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz .')  
     
