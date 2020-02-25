@@ -47,7 +47,7 @@ class model_psf(object):
         
 class ImageModeler(object):
     
-    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True):
+    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, **kwargs):
         self.root = root
         self.LOGFILE=f'{root}.modeler.log.txt'
         self.verbose = verbose
@@ -57,6 +57,9 @@ class ImageModeler(object):
         self.patch_ids = []
         self.patch_nobj = 0
                         
+        self.psf_window = -1
+        self.psf_only = psf_only
+        
         # Read High-res (Hubble) data
         self.read_hst_data(prefer_filter=prefer_filter)
         
@@ -145,7 +148,7 @@ class ImageModeler(object):
                    ' --include "*psf.fits" --include "j*seg.fits.gz"'
                    ' --include "j*phot.fits"')
         
-        os.system('gunzip *drz*fits.gz *seg.fits.gz')
+        os.system('gunzip -f *drz*fits.gz *seg.fits.gz')
         
         # Need ACS?
         wfc_files = glob.glob('j*-f1*sci.fits')
@@ -154,7 +157,7 @@ class ImageModeler(object):
                        ' --exclude "*"'
                        ' --include "j*-f[678]*_[sw]??.fits.gz"')
 
-            os.system('gunzip *_dr*fits.gz *seg.fits.gz')
+            os.system('gunzip -f *_dr*fits.gz *seg.fits.gz')
             
         if not os.path.exists(f'{root}_irac_phot.fits'):
             os.system(f'cp {root}_phot.fits {root}_irac_phot.fits')
@@ -583,7 +586,7 @@ class ImageModeler(object):
                                           transform=xy_offset[i])
 
             lores_psf, psf_exptime, psf_count = _                              
-            if (self.psf_window is -1):
+            if (self.psf_window is -1) | (self.psf_only):
                 psf_kernel = lores_psf
             else:
                 psf_kernel = create_matching_kernel(self.hst_psf_full,
@@ -1502,9 +1505,9 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
 
-RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}} 
+RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False} 
       
-def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, **kwargs):
+def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], **kwargs):
     """
     Generate and run all patches
     """
@@ -1533,15 +1536,16 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
         ds9 = None
             
     if ds9:
+        PWD = os.getcwd()
         ds9.frame(1)
-        ds9.set(f'file {root}-ir_drz_sci.fits')
+        ds9.set(f'file {PWD}/{root}-ir_drz_sci.fits')
         ds9.set_defaults(match='wcs')
         ds9.frame(2)
-        ds9.set(f'file {root}-ir_seg.fits')
+        ds9.set(f'file {PWD}/{root}-ir_seg.fits')
         ds9.frame(3)
-        ds9.set(f'file {root}-ch1_drz_sci.fits')
+        ds9.set(f'file {PWD}/{root}-ch1_drz_sci.fits')
         ds9.frame(4)
-        ds9.set(f'file {root}-ch2_drz_sci.fits')
+        ds9.set(f'file {PWD}/{root}-ch2_drz_sci.fits')
 
         ds9.set('frame lock wcs')
         ds9.set('lock colorbar')
@@ -1549,6 +1553,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
         from grizli.pipeline import auto_script
         auto_script.field_rgb(root, HOME_PATH=None, ds9=ds9, scale_ab=23)
         ds9.set('rgb lock colorbar')
+        ds9.set('frame lock wcs')
                     
     if False:
         ds9 = None
@@ -1562,10 +1567,14 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
         kwargs['galfit_flux_limit'] = None
         kwargs['refine_brightest'] = False
         
-            
-    for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
+    if 'channels' in kwargs:
+        channels = kwargs['channels']
+    
+    models = {}
+                 
+    for ch in channels:
         try:
-            self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
+            self = golfir.model.ImageModeler(root=root, lores_filter=ch, **kwargs) 
         except:
             continue
             
@@ -1591,6 +1600,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
                         kwargs['galfit_flux_limit'] = None
                         
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
+                models[ch] = self
             except:
                 pass
     
@@ -1641,3 +1651,6 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, *
                 pass
 
             self.run_full_patch(rd_patch=None, patch_id=0, **kwargs)
+    
+    return models
+    
