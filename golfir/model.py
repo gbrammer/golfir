@@ -4,6 +4,7 @@ Image-based modeling of IRAC fields
 import os
 import glob
 from collections import OrderedDict
+import traceback
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -70,7 +71,7 @@ class ImageModeler(object):
         self.read_lores_data(filter=lores_filter)
         
         # Initialize PSFs
-        self.init_psfs()
+        self.init_psfs(**kwargs)
         
         # Component file
         component_file = f'{self.root}-{self.lores_filter}_components.fits'
@@ -186,7 +187,13 @@ class ImageModeler(object):
         ref_filter = grizli.utils.get_hst_filter(hst_im[0].header).lower()
         hst_wht = pyfits.open(ref_file.replace('_sci', '_wht'))
         
-        hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(self.root, ref_filter))[1].data
+        try:
+            hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(self.root,
+                                  ref_filter))['PSF','DRIZ1'].data
+        except:
+            hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(self.root, 
+                                  ref_filter))[1].data
+                                  
         hst_psf /= hst_psf.sum()
 
         hst_seg = pyfits.open(self.root+'-ir_seg.fits')[0]
@@ -364,7 +371,7 @@ class ImageModeler(object):
         
         self.lores_cutout_sci = None
         
-    def init_psfs(self, window=HanningWindow()):
+    def init_psfs(self, window=None, **kwargs):#HanningWindow()):
         
         ### (Restart from here after computing alignment below)
 
@@ -580,8 +587,8 @@ class ImageModeler(object):
             #     #tf = {'translation':(rx, ry)}
             #     tf = None
             
-            _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix], 
-                                          dec=phot['dec'][ix], min_count=0, 
+            _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
+                                          dec=phot['dec'][ix][0], min_count=0, 
                                           clip_negative=True, 
                                           transform=xy_offset[i])
 
@@ -589,13 +596,14 @@ class ImageModeler(object):
             if (self.psf_window is -1) | (self.psf_only):
                 psf_kernel = lores_psf
             else:
+                #print('WINDOW {0}'.format(self.psf_window))
                 psf_kernel = create_matching_kernel(self.hst_psf_full,
                                        lores_psf, window=self.psf_window)
 
             _Ai = convolve2d(hst_slice*(self.patch_seg == id), psf_kernel,
-                              mode='constant', fft=1)
+                              mode='constant', fft=1, cval=0.0)
                               
-            _A.append(_Ai[::self.pf, ::self.pf].flatten()*self.pf**2)                 
+            _A.append(_Ai[self.pf//2::self.pf, self.pf//2::self.pf].flatten()*self.pf**2)                 
 
         self._A = np.array(_A)
         
@@ -939,7 +947,7 @@ class ImageModeler(object):
     GAUSS_KEYS = {'n':0.5, 'R_e':0.05, 'q':1., 'pa':0., 
                   'fix':{'n':0, 'R_e':1, 'q':0, 'pa':0}}
 
-    def patch_fit_galfit(self, ids=[], dil_size=11, component_type=None, match_geometry=False, fit_sky=True, component_keys={}, min_err=0.02, chi2_threshold=10, ds9=None):
+    def patch_fit_galfit(self, ids=[], dil_size=11, component_type=None, match_geometry=False, fit_sky=True, component_keys={}, min_err=0.00, chi2_threshold=10, ds9=None, use_oversampled_psf=False, use_flat_rms=True, **kwargs):
         """
         Fit individual sources with Galfit
         
@@ -1031,9 +1039,13 @@ class ImageModeler(object):
                                       transform=None)
                                       
                 galfit_psf_full, galfit_psf_exptime, galfit_psf_count = _    
-                # Resample
-                galfit_psf = galfit_psf_full[self.pf//2::self.pf, self.pf//2::self.pf]
                 
+                # Resample
+                if not use_oversampled_psf:
+                    galfit_psf = galfit_psf_full[self.pf//2::self.pf, self.pf//2::self.pf]
+                else:
+                    galfit_psf = galfit_psf_full*1
+                    
             xy = self.lores_xy[ix,:][0] - self.patch_ll + 0.5
             components[-1].pdict['pos'] = list(xy)
             components[-1].pdict['mag'] = 22.5
@@ -1057,6 +1069,9 @@ class ImageModeler(object):
             ds9.view(sci_cleaned*segmap, header=self.patch_header)
 
         ivar = self.patch_sivar.reshape(self.patch_shape)**2
+        if use_flat_rms:
+            ivar = ivar*0.+np.median(ivar[self.patch_mask])
+            
         # Min error
         ivar = 1/(1/ivar+(min_err*sci_cleaned)**2)
         
@@ -1084,9 +1099,14 @@ class ImageModeler(object):
         
         try:
             
+            if use_oversampled_psf:
+                psf_sample = self.pf
+            else:
+                psf_sample = 1
+                
             gf_root = f'gf{self.patch_id}{self.lores_filter}'
             gf = _fitter.fit_arrays(sci_cleaned, ivar*segmap, segmap*1, 
-                                galfit_psf, psf_sample=1, id=1, 
+                                galfit_psf, psf_sample=psf_sample, id=1, 
                                 components=components, recenter=False, 
                                 exptime=0, path=os.getcwd(), root=gf_root)
             
@@ -1097,6 +1117,7 @@ class ImageModeler(object):
                 ds9.view(gf['resid'].data*segmap, header=self.patch_header)
             
         except:
+            grizli.utils.log_exception('galfit.failed', traceback, verbose=True)
             chi2_final = 1e30
             gf = None
             
@@ -1336,13 +1357,14 @@ class ImageModeler(object):
         self.comp_hdu.writeto(component_file, overwrite=True)
                 
 
-    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, **kwargs):
+    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, **kwargs):
         """
         Run the multi-step process on a single patch
         """
         
         if not hasattr(mag_limit, '__len__'):
-            mag_limit = [mag_limit, mag_limit]
+            #mag_limit = [mag_limit, mag_limit]
+            run_alignment=False
             
         if False:
             self.run_full_patch(rd_patch=None, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id, mag_limit=mag_limit, galfit_flux_limit=10, match_geometry=False)
@@ -1351,7 +1373,7 @@ class ImageModeler(object):
         self.patch_initialize(rd_patch=rd_patch, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id, bkg_kwargs=bkg_kwargs)
         
         # First pass on models
-        self.patch_compute_models(mag_limit=mag_limit[0], use_saved_components=True, **kwargs)
+        self.patch_compute_models(mag_limit=mag_limit[0], **kwargs)
         self.patch_least_squares()
                 
         # Alignment
@@ -1362,12 +1384,12 @@ class ImageModeler(object):
                 self.patch_display(ds9=ds9)
         
             # Regenerate models with alignment transform
-            self.patch_compute_models(mag_limit=mag_limit[1],
-                                      **self.bright_args)
+            self.patch_compute_models(mag_limit=mag_limit[1], **kwargs)
             self.patch_least_squares()
         
         # Error scaling
-        self.compute_err_scale()  
+        if rescale_uncertainties:
+            self.compute_err_scale()  
         
         if ds9:
             ds9.frame(15)
@@ -1398,7 +1420,8 @@ class ImageModeler(object):
                 
                 self.patch_fit_galfit(ids=[id], component_type=comp,
                                       chi2_threshold=10, 
-                                      match_geometry=match_geometry)
+                                      match_geometry=match_geometry, 
+                                      **galfit_kwargs)
             
                 if ds9:
                     ds9.frame(18)
@@ -1406,14 +1429,18 @@ class ImageModeler(object):
                              header=self.patch_header)
                    
         # Refine error scaling
-        self.compute_err_scale()  
+        if rescale_uncertainties:
+            self.compute_err_scale()  
         
         # Refine galfit for brightest
         if refine_brightest:
             bright_ids = -1
             bright_ids = list(self.patch_ids[self.patch_is_bright])
             
-            self.patch_bright_limits(any_limit=10, point_limit=10)
+            self.bright_args['any_limit'] = 10
+            self.bright_args['point_limit'] = 10
+            
+            self.patch_bright_limits(**self.bright_args)
             for id in bright_ids:
                 for comp in ['psf',None]:
                     self.patch_fit_galfit(ids=[id], component_type=comp,
@@ -1429,12 +1456,13 @@ class ImageModeler(object):
                         ds9.view(self.patch_resid*self.patch_mask,
                                  header=self.patch_header)
             
-            self.patch_bright_limits(any_limit=17, point_limit=17,
-                                     bright_ids=bright_ids)
+            self.bright_args['bright_ids'] = bright_ids
+            self.patch_bright_limits(**self.bright_args)
 
             self.patch_least_squares()
             # Error scaling
-            self.compute_err_scale()  
+            if rescale_uncertainties:
+                self.compute_err_scale()  
             
             if ds9:
                 ds9.frame(18)
@@ -1505,9 +1533,9 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
 
-RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False} 
+RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None} 
       
-def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], **kwargs):
+def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, **kwargs):
     """
     Generate and run all patches
     """
@@ -1528,12 +1556,22 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             os.mkdir(root)
         
         os.chdir(root)
-        golfir.model.ImageModeler.fetch_from_aws(root)
+        if fetch:
+            golfir.model.ImageModeler.fetch_from_aws(root)
         
     try:
         _ = ds9
     except:
         ds9 = None
+    
+    if False:
+        scl = {'ch1':1.02, 'ch2':1.02, 'ch3':1.0, 'ch4':1.0}
+        for ch in scl:
+            psf_file = glob.glob(f'../AvgPSF/irac_{ch}_*[md]_psf.fits')[-1]
+            print(psf_file)
+            psf = pyfits.open(psf_file)
+            psf[0].data = psf[0].data**(scl[ch])
+            psf.writeto(f'{root}-{ch}-0.1.psfr_avg.fits', overwrite=True)
             
     if ds9:
         PWD = os.getcwd()
@@ -1589,9 +1627,15 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
                 _ = kwargs.pop(k)
             
         N = len(tab)
+        if (not use_patches):
+            N = 1
+            patches = [None]
+        else:
+            patches = [(tab['ra'][i], tab['dec'][i]) for i in range(N)]
+            
         for i in range(N):
             try:
-                rd_patch = (tab['ra'][i], tab['dec'][i])
+                rd_patch = patches[i]
                 if ch > 'ch2':
                     if 'galfit_flux_limit' in kwargs:
                         if kwargs['galfit_flux_limit'] is not None:
@@ -1645,12 +1689,25 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
     # Manual position
     if False:
         for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
+            
+            if 1:
+                scl = {'ch1':1.0, 'ch2':1.02, 'ch3':1.0, 'ch4':1.0}
+                os.system('rm *model.fits *components.fits')
+                psf_file = glob.glob(f'../AvgPSF/irac_{ch}_*[md]_psf.fits')[-1]
+                print(psf_file)
+                psf = pyfits.open(psf_file)
+                psf[0].data = psf[0].data**(scl[ch])
+                psf.writeto(f'{root}-{ch}-0.1.psfr_avg.fits', overwrite=True)
+
             try:
-                self = golfir.model.ImageModeler(root=root, lores_filter=ch) 
+                self = golfir.model.ImageModeler(root=root, lores_filter=ch, **kwargs) 
             except:
                 pass
 
             self.run_full_patch(rd_patch=None, patch_id=0, **kwargs)
-    
+            
+            if 0:
+                from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
+                
     return models
     
