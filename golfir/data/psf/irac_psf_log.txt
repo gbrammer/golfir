@@ -1,4 +1,4 @@
-FILE                    	CHANNEL	MISSION 	MJDMIN       	MJDMAX       	
+# file                    	channel	mission 	mjdmin       	mjdmax       	
 irac_ch1_cold_0_psf.fits	1      	cold    	52926.8228633	53779.6680016	
 irac_ch1_cold_1_psf.fits	1      	cold    	53779.6680016	54943.5158913	
 irac_ch1_warm_0_psf.fits	1      	warm    	55040.6084838	55515.8515357	

@@ -4,7 +4,7 @@ IRAC empirical PSFs
 Empirical PSFs drizzled from the `GOLF` HST+Spitzer fields.  
 
 PSFs are created for each individual AOR by drizzling 30" cutouts centered 
-around  GAIA DR2 stars, where the centers are taken as the proper GAIA 
+around GAIA DR2 stars, where the centers are taken as the GAIA 
 positions incorporating GAIA proper motions projected to the observation epoch.
 
 The PSF files here are provided on a 0.1" pixel scale, drizzled with
