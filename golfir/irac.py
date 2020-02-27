@@ -519,7 +519,7 @@ class IracAOR():
         
         pedestal, med2d = self.get_median(extra_mask=extra_mask)
         
-        med_hdu = utils.make_maximal_wcs(self.wcs, pixel_scale=pixel_scale, theta=-self.theta, pad=10, get_hdu=True, verbose=False)
+        med_hdu = utils.make_SEP_catalog_wcs(self.wcs, pixel_scale=pixel_scale, theta=-self.theta, pad=10, get_hdu=True, verbose=False)
         sh = med_hdu.data.shape
         med_wcs = pywcs.WCS(med_hdu.header)
         med_wcs.pscale = pixel_scale
