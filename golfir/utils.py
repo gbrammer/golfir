@@ -1435,4 +1435,196 @@ def run_galfit(id=7739):
 
         ds9.frame(14)
         ds9.view(msk2d*(irac_im.data[isly, islx]-h_model), header=utils.get_wcs_slice_header(irac_wcs, islx, isly))
+
+def match_slice_to_shape(slparent, nparent):
+    """
+    Refine a slice for a parent array that might not contain a full child
+    """
+    
+    nchild = slparent.stop - slparent.start
+    
+    if (slparent.start > nparent) | (slparent.stop < 1):
+        null = slice(0,0)
+        return null, null
         
+    if slparent.start < 0:
+        left = -slparent.start
+    else:
+        left = 0
+    
+    if slparent.stop > nparent:
+        right = slparent.stop - nparent
+    else:
+        right = 0
+    
+    oslparent = slice(slparent.start+left, slparent.stop-right, slparent.step)
+    oslchild= slice(left, nchild-right, slparent.step)
+    return oslparent, oslchild
+    
+def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='square', recenter=False):
+    """
+    Drizzle effective PSF model given the oversampled model PRF
+    """
+    from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
+    
+    # r48106752/ch1/bcd/SPITZER_I1_48106752_0001_0000_2_cbcd.fits
+    ch = int(log['file'][0].split("_")[1][-1])
+    if __name__ == "__main__":
+        import golfir
+        _path = os.path.dirname(golfir.__file__)
+    else:
+        _path = os.path.dirname(__file__)
+        
+    h_file = os.path.join(_path, f'data/bcd_ch{ch}.header')
+    sip_h = pyfits.Header.fromtextfile(h_file)
+    
+    N = len(log)
+    
+    #if rd is None:
+    rd = np.mean(log['crval'][:N//2], axis=0)
+    
+    ipsf = pyfits.open(f'../AvgPSF/IRAC/apex_sh_IRACPC{ch}_col129_row129_x100.fits', relax=True)
+
+    ipsf = pyfits.open(f'../AvgPSF/Cryo/apex_sh_IRAC{ch}_col129_row129_x100.fits', relax=True)
+
+    #ipsf = pyfits.open(f'../AvgPSF/IRAC/IRACPC{ch}_col129_row129.fits')
+    
+    if 'PRFXRSMP' in ipsf[0].header:
+        osamp = ipsf[0].header['PRFXRSMP']
+    else:
+        osamp = 100
+        
+    ish = ipsf[0].data.shape
+    
+    if recenter:
+        # Centroid
+        yp, xp = np.indices(ish)  
+        pp = ipsf[0].data
+        xc = int(np.round((pp*xp).sum()/pp.sum()))
+        yc = int(np.round((pp*yp).sum()/pp.sum()))
+        i0 = [xc, yc]
+    else:
+        i0 = [s//2 for s in ish]
+        
+    # Number of pixels to extract
+    inp = np.min([xc, yc]) - osamp//2
+    # Extra padding
+    if osamp == 100:
+        inp -= 20
+    else:
+        inp -= 1
+        
+    wcs_list = []
+    sci_list = []
+    wht_list = []
+        
+    wht_i = np.ones((256,256), dtype=np.float32)
+    
+    coords = [rd]
+    cosd = np.cos(rd[1]/180*np.pi)
+    for dx in np.linspace(-1, 1, 4):
+        for dy in np.linspace(-1, 1, 4):
+            if dx == dy == 0:
+                continue
+            
+            delta = np.array([dx/cosd/60, dy/60])
+            coords.append(rd+delta)
+            
+    for k in range(N):
+        print('Parse file: {0}'.format(log['file'][k]))
+        
+        if 1:
+            cd = log['cd'][k] 
+            theta = np.arctan2(cd[1][0], cd[1][1])/np.pi*180
+            print(k, theta)
+            
+        sip_h['CRPIX1'] = log['crpix'][k][0]
+        sip_h['CRPIX2'] = log['crpix'][k][1]
+        
+        sip_h['CRVAL1'] = log['crval'][k][0]
+        sip_h['CRVAL2'] = log['crval'][k][1]
+        
+        sip_h['LATPOLE'] = log['crval'][k][1]
+
+        for i in range(2):
+            for j in range(2):
+                key = f'CD{i+1}_{j+1}'
+                sip_h[key] = log['cd'][k][i,j]
+        
+        wcs_i = pywcs.WCS(sip_h, relax=True)
+        wcs_i.pscale = utils.get_wcs_pscale(wcs_i)
+        
+        sci_i = np.zeros((256,256), dtype=np.float32)
+        
+        for coo in coords:
+            try:
+                xy = wcs_i.all_world2pix([coo], 0).flatten() + 0.5
+                # if ch == 2:
+                #     xy += 0.25
+            except:
+                print('wcs failed')
+                continue
+            
+            xyp = np.cast[int](np.floor(xy))
+            phase = np.cast[int](np.round((xy-xyp)*osamp - osamp/2.))
+        
+            oslx = slice(i0[0]-phase[0]-inp, i0[0]-phase[0]+inp+1, osamp)
+            osly = slice(i0[1]-phase[1]-inp, i0[1]-phase[1]+inp+1, osamp)
+            psf_sub = ipsf[0].data[osly, oslx]
+            osh = psf_sub.shape
+        
+            nparent = 256
+            slx0 = slice(xyp[0]-osh[1]//2, xyp[0]+osh[1]//2)
+            sly0 = slice(xyp[1]-osh[0]//2, xyp[1]+osh[0]//2)  
+        
+            slpx, slcx = (match_slice_to_shape(slx0, nparent))    
+            slpy, slcy = (match_slice_to_shape(sly0, nparent))    
+            try:
+                sci_i[slpy, slpx] += psf_sub[slcy, slcx]
+            except:
+                print('slice failed')
+                
+        wcs_list.append(wcs_i)
+        sci_list.append(sci_i)
+        wht_list.append((sci_i != 0).astype(np.float32))
+        
+        # ds9.frame(k)
+        # ds9.view(sci_i, header=sip_h)
+    
+    if use_native_orientation:   
+        cd = log['cd'][0] 
+        theta = np.arctan2(cd[1][0], cd[1][1])/np.pi*180
+    else:
+        theta=0
+    
+    for k, coo in enumerate(coords):
+        print('Drizzle coords: {0}'.format(coo))
+
+        out_hdu = utils.make_wcsheader(ra=coo[0], dec=coo[1], size=size, pixscale=pixel_scale, theta=-theta, get_hdu=True)
+        #out_h, out_wcs = _out
+        out_wcs = pywcs.WCS(out_hdu.header)
+        out_wcs.pscale = utils.get_wcs_pscale(out_wcs)
+
+        if False:
+            _drz = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+                     outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
+                     verbose=False)
+            
+            drz_psf = _drz[0] / _drz[0].sum()               
+            pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_{k}_psf.fits', data=drz_psf, overwrite=True)
+        else:   
+            if k == 0:
+                _drz = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+                         outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
+                         verbose=False)
+            else:
+                _ = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+                         outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
+                         verbose=False, data=_drz[:3])
+                     
+    sci, wht, ctx, head, w = _drz  
+    coswindow = CosineBellWindow(alpha=1)(_drz[0].shape)**0.05
+
+    drz_psf = (_drz[0]*coswindow) / (_drz[0]*coswindow).sum()     
+              
+    pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_psf.fits', data=drz_psf, overwrite=True)

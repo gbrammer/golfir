@@ -278,9 +278,28 @@ class ImageModeler(object):
         ################
         # Parameters for IRAC fitting
         if use_avg_psf & (filter in ['ch1','ch2','ch3','ch4']):
-            avg_psf = pyfits.open('{0}-{1}-0.1.psfr_avg.fits'.format(self.root, filter))[0].data
+            #avg_psf = pyfits.open('{0}-{1}-0.1.psfr_avg.fits'.format(self.root, filter))[0].data
+            _path = os.path.dirname(irac.__file__)
+            
+            if 0:
+                # My stacked psfs
+                psf_file = os.path.join(_path, 
+                                    f'data/psf/irac_{filter}_cold_psf.fits')
+            else:
+                # Generated from IRSA PRFs
+                psf_file = os.path.join(_path, 
+                                    f'data/psf/irsa_0.1pix_{filter}_psf.fits')
+            
+            avg_psf = pyfits.open(psf_file)[0].data
+            
+            grizli.utils.log_comment(self.LOGFILE, 
+                   f'Read avg psf: {psf_file}\n',
+                   verbose=self.verbose, show_date=True)
+                   
+            self.avg_psf_file = psf_file
         else:
             avg_psf = None
+            self.avg_psf_file = None
 
         avg_kern = None #np.ones((5,5))
         
@@ -1406,12 +1425,15 @@ class ImageModeler(object):
             # err = np.sqrt(covar.diagonal())[self.Nbg:]
             # 
             fit_bright = self.patch_obj_coeffs > galfit_flux_limit
-            fit_bright &= (~self.patch_ids_in_border)
+            #fit_bright &= (~self.patch_ids_in_border)
             fit_bright &= (~self.patch_is_bright)
             
             so = np.argsort(self.patch_obj_coeffs[fit_bright])[::-1]
             bright_ids = self.patch_ids[fit_bright][so]
-            fit_with_psf = self.phot['flux_radius'][ix][fit_bright][so] < 1.5
+            #fit_with_psf = self.phot['flux_radius'][ix][fit_bright][so] < 1.5
+            #fit_with_psf=False
+            fit_with_psf = self.phot['flux_radius'][ix][fit_bright][so] < 0
+            
             for id, is_psf in zip(bright_ids, fit_with_psf):
                 if is_psf:
                     comp = 'psf'
@@ -1690,7 +1712,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
     if False:
         for ch in ['ch1', 'ch2', 'ch3', 'ch4']:
             
-            if 1:
+            if False:
                 scl = {'ch1':1.0, 'ch2':1.02, 'ch3':1.0, 'ch4':1.0}
                 os.system('rm *model.fits *components.fits')
                 psf_file = glob.glob(f'../AvgPSF/irac_{ch}_*[md]_psf.fits')[-1]
