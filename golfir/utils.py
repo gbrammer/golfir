@@ -1483,7 +1483,7 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     #if rd is None:
     rd = np.mean(log['crval'][:N//2], axis=0)
     
-    ipsf = pyfits.open(f'../AvgPSF/IRAC/apex_sh_IRACPC{ch}_col129_row129_x100.fits', relax=True)
+    #ipsf = pyfits.open(f'../AvgPSF/IRAC/apex_sh_IRACPC{ch}_col129_row129_x100.fits', relax=True)
 
     ipsf = pyfits.open(f'../AvgPSF/Cryo/apex_sh_IRAC{ch}_col129_row129_x100.fits', relax=True)
 
@@ -1533,7 +1533,7 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     for k in range(N):
         print('Parse file: {0}'.format(log['file'][k]))
         
-        if 1:
+        if 0:
             cd = log['cd'][k] 
             theta = np.arctan2(cd[1][0], cd[1][1])/np.pi*180
             print(k, theta)

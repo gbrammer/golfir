@@ -1578,7 +1578,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             os.mkdir(root)
         
         os.chdir(root)
-        if fetch:
+        if fetch & (not os.path.exists(f'{root}-ch1_drz_sci.fits')):
             golfir.model.ImageModeler.fetch_from_aws(root)
         
     try:
