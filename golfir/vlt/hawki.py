@@ -22,30 +22,42 @@ eso = astroquery.eso.Eso()
 if False:
     eso.login() #reenter_password=True)
 
-def runit(field='', eso=None):
+def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'pad':60}, fetch=True, request_id=None):
     
     from golfir.vlt import hawki
+    
+    if eso is None:
+        eso = astroquery.eso.Eso()
+        eso.login()
     
     if not eso._authenticated:
         eso.login()
         
-    if field.startswith('hff-'):
+    if root.startswith('hff-'):
         # Run in two steps for global masking
         pass
     else:
         pass
     
-    hawki.pipeline(field=field, eso=eso, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4])
-        
-    hawki.sync_results()
+    if __name__ == '__main__':
+        ob_indices=None
+        use_hst_radec=False
+        extensions = [1,2,3,4]
+        redrizzle_args = {'pad':60}
+        request_id = None
+        fetch=True
     
-    if os.path.exists(f'{field}-ks_drz_sci.fits.gz'):
+    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id)
+        
+    hawki.sync_results(include_exposures=False)
+    
+    if os.path.exists(f'{root}-ks_drz_sci.fits.gz'):
         os.chdir('../')
-        os.system(f'rm -rf {field}')
+        os.system(f'rm -rf {root}')
     else:
         print('Problem?')
         
-def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True):
+def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, **kwargs):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -53,9 +65,9 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
         # Configure 'username' in ~/.astropy/config
         eso.login() #reenter_password=True)
     
-    os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{field}_hawki.fits .')
+    os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{root}_hawki.fits .')
     
-    tab = utils.read_catalog(field+'_hawki.fits')
+    tab = utils.read_catalog(root+'_hawki.fits')
     
     if ob_indices is None:
         datasets = tab['DP.ID']
@@ -70,20 +82,20 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
             sl = slice(ob_start[ind], ob_end[ind])
             datasets.extend(list(tab['DP.ID'][sl]))
             
-    dirs = [field, os.path.join(field, 'RAW'), os.path.join(field, 'Processed')]
+    dirs = [root, os.path.join(root, 'RAW'), os.path.join(root, 'Processed')]
     for dir in dirs:
         print(dir)
         if not os.path.exists(dir):
             os.mkdir(dir)
     
-    print(f'{field}: fetch {len(datasets)} files (ob_indices={ob_indices})')       
+    print(f'{root}: fetch {len(datasets)} files (ob_indices={ob_indices})')       
     
-    request_id = None # Restart an earlier request
+    #request_id = None # Restart an earlier request
     
     os.chdir(dirs[1])
 
     if fetch:
-        data_files = eso.retrieve_data(datasets, destination=dirs[1], continuation=True, request_id=request_id)
+        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), continuation=True, request_id=request_id)
     
         files = glob.glob('*.Z')
         files.sort()
@@ -94,10 +106,10 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
     
     os.chdir('../')
     
-    os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}-ir_drz_sci.fits.gz .')  
+    os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
     
     if use_hst_radec:
-        radec = hawki.make_hst_radec(field, maglim=[16,22])
+        radec = hawki.make_hst_radec(root, maglim=[16,22])
         
     hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02)
     
@@ -109,27 +121,27 @@ def pipeline(field='j234456m6406', eso=None, ob_indices=None, use_hst_radec=Fals
             print(f'Clean {froot} failed')
             os.system(f'rm *{froot}* Processed/{froot}*')
         
-        radec = hawki.make_hst_radec(field, maglim=[16,22])
+        radec = hawki.make_hst_radec(root, maglim=[16,22])
         hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
     
     # from importlib import reload
     # reload(hawki)     
-    hawki.redrizzle_mosaics()
+    hawki.redrizzle_mosaics(**redrizzle_args)
     
         
-def make_hst_radec(field, maglim=[16,22]):
+def make_hst_radec(root, maglim=[16,22]):
     
     from grizli import prep
     
-    phot_file = f'{field}_phot.fits'
+    phot_file = f'{root}_phot.fits'
     
     if not os.path.exists(phot_file):
-        os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{field}/Prep/{field}_phot.fits .')  
+        os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{root}/Prep/{root}_phot.fits .')  
     
     phot = utils.read_catalog(phot_file)
     sel = (phot['mag_auto'] > maglim[0]) & (phot['mag_auto'] < maglim[1])
     
-    radec_file = f'{field}_{maglim[0]:4.1f}_{maglim[1]:4.1f}.radec'
+    radec_file = f'{root}_{maglim[0]:4.1f}_{maglim[1]:4.1f}.radec'
     
     print(f'make_hst_radec: {radec_file} {sel.sum()}')
     
@@ -237,14 +249,14 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='No
             utils.log_exception(LOGFILE, traceback)
     
 def sync_results(include_exposures=False):
-    
-    # Remove old Failed files
-    os.system('aws s3 rm s3://grizli-v1/HAWKI/{field}/ --recursive --exclude "*" --include "*failed"')
-    
+        
     # Zip and Sync to AWS
-    field = os.getcwd().split('/')[-1]
+    root = os.getcwd().split('/')[-1]
 
-    files = glob.glob(f'{field}-ks_drz*')    
+    # Remove old Failed files
+    os.system(f'aws s3 rm s3://grizli-v1/HAWKI/{root}/ --recursive --exclude "*" --include "*failed"')
+
+    files = glob.glob(f'{root}-ks_drz*')    
     files += glob.glob('*flat.masked.fits')
     files += glob.glob('ob*_drz*fits')
     if include_exposures:
@@ -254,20 +266,20 @@ def sync_results(include_exposures=False):
         print(f'gzip {file}')
         os.system(f'gzip {file}')
         
-    fp = open(f'{field}_hawki.html','w')
-    fp.write(f'<h4>{field} - {time.ctime()}</h4>\n')
-    fp.write(f'HST: <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{field}/Prep/{field}.summary.html">{field}</a><br>\n')
+    fp = open(f'{root}_hawki.html','w')
+    fp.write(f'<h4>{root} - {time.ctime()}</h4>\n')
+    fp.write(f'HST: <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">{root}</a><br>\n')
 
-    fp.write(f'<img src="https://s3.amazonaws.com/grizli-v1/HAWKI/{field}_hawki.png" height=300px><br>\n')
-    fp.write(f'<a href="https://s3.amazonaws.com/grizli-v1/HAWKI/{field}_hawki.fits">{field}_hawki.fits</a><br><p>\n')
+    fp.write(f'<img src="https://s3.amazonaws.com/grizli-v1/HAWKI/{root}_hawki.png" height=300px><br>\n')
+    fp.write(f'<a href="https://s3.amazonaws.com/grizli-v1/HAWKI/{root}_hawki.fits">{root}_hawki.fits</a><br><p>\n')
     
     fp.write('<pre>\n')
     
-    cmd = f'aws s3 sync ./ s3://grizli-v1/HAWKI/{field}/ --acl public-read --exclude "*" --include "*html"'
+    cmd = f'aws s3 sync ./ s3://grizli-v1/HAWKI/{root}/ --acl public-read --exclude "*" --include "*html"'
     
-    os.system(f'dfits Processed/*fits | fitsort  CRVAL1 CRVAL2 CRPIX1 CRPIX2 CD1_1 CD1_2 CD2_1 CD2_2 BKGORDER BKG001 BKG002 BKG003 BKG003 BKG004 BKG005 BKG006 BKG007 BKG008 BKG009 ORIGFILE DET.NDIT DET.DIT TPL.NEXP TPL.EXPNO OBS.ID > {field}.exposures.txt')
+    os.system(f'dfits Processed/*fits | fitsort  CRVAL1 CRVAL2 CRPIX1 CRPIX2 CD1_1 CD1_2 CD2_1 CD2_2 BKGORDER BKG001 BKG002 BKG003 BKG003 BKG004 BKG005 BKG006 BKG007 BKG008 BKG009 ORIGFILE DET.NDIT DET.DIT TPL.NEXP TPL.EXPNO OBS.ID > {root}.exposures.txt')
     
-    for group in [f'{field}-ks_drz*gz', '*flat.masked.fits.gz', '*files',  'ob*_drz*fits.gz', 'ob*[1-4].log', '*exposures.txt', 'ob*failed', 'ob*[1-4]*wcs.*', 'Processed/*gz', 'vista.fits', '*gaia*']:
+    for group in [f'{root}-ks_drz*gz', '*flat.masked.fits.gz', '*files',  'ob*_drz*fits.gz', 'ob*[1-4].log', '*exposures.txt', 'ob*failed', 'ob*[1-4]*wcs.*', 'Processed/*gz', 'vista.fits', '*gaia*']:
         files = glob.glob(group)
         files.sort()
         
@@ -299,6 +311,9 @@ def flat_gradient():
 def redrizzle_mosaics(cat_kwargs={}, pad=60):
     """
     Redrizzle mosaic with padding
+    
+    pad: padding around ref_image in arcsec
+    
     """
     if 'Process2020' in os.getcwd():
         ref_image = 'hff-j001408m3023-f160w_drz_sci.fits.gz'
@@ -616,176 +631,17 @@ def redrizzle_mosaics(cat_kwargs={}, pad=60):
         # Point sources
         stars = (cat['mag_auto'] < 21.5) & (cat['mag_auto'] > 16) & (cat['flux_radius'] < 3.2) & (cat['flux_radius'] > 2)
         cat['ra', 'dec', 'mag_auto'][stars].write('a2744_stars.fits')
-    
-def make_mosaic():
-    
-    if 0:
-        ref_image = 'hff-j001408m3023-f160w_drz_sci.fits.gz'
-        root = 'a2744-test'
-    else:
-        ref_image = 'hawki-driz-v2-100mas-ks_drz_sci.fits'
-        root = 'valentino-qz4'
         
-    ref = pyfits.open(ref_image)
-    ref_wcs = pywcs.WCS(ref[0].header, relax=True)
-    ref_wcs.pscale = utils.get_wcs_pscale(ref_wcs)
-    
-    ext = '*'
-    
-    files = glob.glob('Processed/*-{0}.sci.fits'.format(ext))
-    files.sort()
-    
-    N = len(files)
-    
-    if ext == '*':
-        out_root = '{0}{1}-ks'.format(root, '')
-    else:
-        out_root = '{0}{1}-ks'.format(root, ext)
-    
-    # Drizzle result at intermediate steps
-    Ninter = 64
-        
-    _drz = None
-    for i, file in enumerate(files):
-        print(i, N, file)
-        im = pyfits.open(file)
-        wcs_i = pywcs.WCS(im[0].header, relax=True)
-        wcs_i.pscale = utils.get_wcs_pscale(wcs_i)
-        
-        froot = os.path.basename(file).split('.sci.fits')[0]
-        ext_i = int(froot[-1])
-        ob_root = froot[:-6]
-        dq = pyfits.open(f'{ob_root}-{ext_i}.flat.fits')
-        
-        sci = im[0].data
-        wht = dq['DQ'].data/im[0].header['NMAD']**2
-        
-        if _drz is None:
-            _drz = utils.drizzle_array_groups([sci], [wht.astype(np.float32)], [wcs_i], outputwcs=ref_wcs, kernel='point', verbose=False)
-            header = _drz[3]
-            header['NDRIZIM'] = 1
-            header['DIT'] = 15.
-            #header['EXPTIME'] = im[0].header['EXPTIME']
-        else:
-            _ = utils.drizzle_array_groups([sci], [wht.astype(np.float32)], [wcs_i], outputwcs=ref_wcs, kernel='point', data=_drz[:3], verbose=False)
-            header['NDRIZIM'] += 1
-            #header['EXPTIME'] += im[0].header['EXPTIME']    
-        
-        if (i > 0) & (i % Ninter == 0):
-            print('Write')
-            root = 'test'
-
-            sci_scl = 1./header['DIT'] 
-            relative_pscale = ref_wcs.pscale/wcs_i.pscale
-            wht_scl = header['DIT']**2*relative_pscale**-4
-
-            pyfits.writeto('{0}_drz_sci.fits'.format(out_root), data=_drz[0]*sci_scl, header=header, clobber=True, output_verify='fix')
-            pyfits.writeto('{0}_drz_wht.fits'.format(out_root), data=_drz[1]*wht_scl, header=header, clobber=True, output_verify='fix')
-    
-    relative_pscale = ref_wcs.pscale/wcs_i.pscale
-    sci_scl = 1./header['DIT'] 
-    wht_scl = header['DIT']**2*relative_pscale**-4
-    
-    header['ZP'] = 25, 'Dummy zeropoint'
-    header['PHOTFNU'] = 10**(-0.4*(25-8.90)), 'Dummy zeropoint'
-    header['FILTER'] = 'Ks'
-    header['INSTRUME'] = 'HAWKI'
-    
-    print('Write')
-    pyfits.writeto('{0}_drz_sci.fits'.format(out_root), data=_drz[0]*sci_scl, header=header, clobber=True, output_verify='fix')
-    pyfits.writeto('{0}_drz_wht.fits'.format(out_root), data=_drz[1]*wht_scl, header=header, clobber=True, output_verify='fix')
-    
-    bkg_params={'bw': 128, 'bh': 128, 'fw': 3, 'fh': 3, 'pixel_scale':0.1}
-    
-    cat = prep.make_SEP_catalog(out_root, threshold=1.2, column_case=str.lower, bkg_params=bkg_params)
-    
-    # Masked background
-    seg = pyfits.open('{0}_seg.fits'.format(out_root))
-    seg_mask = seg[0].data > 0
-    
-    cat = prep.make_SEP_catalog(out_root, threshold=1.4, column_case=str.lower, bkg_params=bkg_params, bkg_mask=seg_mask)
-    
-    if False:
-        vista = utils.read_catalog('viking.fits')
-        vista['ra'] = vista['RAJ2000']
-        vista['dec'] = vista['DEJ2000']
-        
-        idx, dr = vista.match_to_catalog_sky(cat)
-        mat = (dr.value < 0.5) & (vista[idx]['Kspmag'] > 12)
-        prep.table_to_regions(vista[idx][mat], 'vista.reg')
-        
-        # http://casu.ast.cam.ac.uk/surveys-projects/vista/technical/filter-set
-        vega2ab = 1.827
-        kcol = 'Kspmag'
-        dmag = cat['mag_auto'] - (vista[kcol][idx] + vega2ab)
-        mat &= np.isfinite(dmag)
-        
-        med = np.median(dmag[mat])
-        plt.errorbar(cat['mag_auto'][mat] - med, dmag[mat], vista['e_'+kcol][idx][mat],  alpha=0.5, linestyle='None', marker='None', color='k')
-        plt.scatter(cat['mag_auto'][mat] - med, dmag[mat], c=cat['flux_radius'][mat], vmin=1, vmax=5, zorder=1000)
-        plt.ylim(med-1, med+1)
-        plt.grid()
-        
-    sci = pyfits.open('{0}_drz_sci.fits'.format(out_root))
-    wht = pyfits.open('{0}_drz_wht.fits'.format(out_root))
-    bkg = pyfits.open('{0}_bkg.fits'.format(out_root))
-    msk = wht[0].data > 0
-    
-    sel = (cat['mag_auto'] < 18) & (cat['flux_radius'] > 1)
-    sel &= (cat['mag_auto'] > 13) #& (cat['flux_radius'] < 7)
-    
-    ### HST catalog
-    import scipy.spatial
-    
-    phot = utils.read_catalog('hff-j001408m3023_phot.fits')
-    pos = np.array([phot['x'], phot['y']]).T
-    #pos = (pos - np.median(pos,  axis=0))    
-    ptree = scipy.spatial.cKDTree(pos)
-    
-    idx, dr = phot.match_to_catalog_sky(cat)
-    phot = phot[idx]
-    
-    cosd = np.cos(cat['dec']/180*np.pi)
-    dx = (cat['ra']-phot['ra'])*cosd*3600
-    dy = (cat['dec']-phot['dec'])*3600
-    
-    cpos = np.array([cat['x'], cat['y']]).T
-    ctree = scipy.spatial.cKDTree(cpos)
-    nnq = ctree.query_ball_tree(ptree, 0.5/0.1)
-    nn = np.array([len(n) for n in nnq])
-
-    #dn, nn = tree.query(pos, k=2)
-    #dr_nn = dn[:,1]*0.1 # arcsec
-    
-    if 0:
-        # prep.table_to_regions(cat[sel], 'a2744_ks_shallow.reg') 
-        # prep.table_to_radec(cat[sel], 'a2744_ks_shallow.radec')
-        prep.table_to_regions(cat[sel], out_root+'_wcs.reg') 
-        prep.table_to_radec(cat[sel], out_root+'_wcs.radec')
-        
-    hsel = sel & (dr.value < 0.3)
-    plt.scatter(cat['x'][hsel], cat['y'][hsel], alpha=0.5, c=dx[hsel], vmin=-0.1, vmax=0.1) 
-    
-    # Individual catalogs
-    #plt.scatter(cat['mag_auto'], cat['flux_aper_1'] / cat['flux_aper_5'], alpha=0.2, color='k')
-    plt.scatter(cat['mag_auto'], cat['flux_radius'], alpha=0.2, color='k')
-    
-    files = glob.glob('ob*-2-*.cat.fits')
-    for file in files:
-        print(file)
-        cat_i = utils.read_catalog(file)
-        plt.scatter(cat_i['mag_auto'.upper()], cat_i['flux_radius'.upper()], alpha=0.2)
-        #plt.scatter(cat_i['mag_auto'.upper()], cat_i['flux_aper_1'.upper()] / cat_i['flux_aper_5'.upper()], alpha=0.2)
-    
-    plt.ylim(0,1)
 def get_ob_root(h0):
+    """
+    Get the OB root name from the header
+    """
     if isinstance(h0, str):
         h0 = pyfits.open(h0)[0].header
     
     ob_root = 'ob{0}-{1}'.format(h0['HIERARCH ESO OBS ID'], h0['DATE-OBS'][:-5].replace('-','').replace(':','').replace('T','-'))
     
     return ob_root
-    
     
 def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02):
     """
