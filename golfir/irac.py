@@ -549,7 +549,7 @@ class IracAOR():
             med_data = np.zeros((self.N, sh[0], sh[1]), dtype=np.float32)
         
             for i in range(self.N):
-                drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point')
+                drz = utils.drizzle_array_groups([(self.cbcd-med2d)[i,:,:]], [(self.ivar*(self.dq == 0))[i,:,:]], [self.shift_wcs[i]], outputwcs=med_wcs, kernel='point', verbose=False)
                 med_data[i,:,:] = drz[0]
         
             med_ma = np.ma.masked_array(med_data, mask=med_data == 0)
@@ -768,7 +768,7 @@ class IracAOR():
         
         sci, wht, ctx, head, w = utils.drizzle_array_groups(in_sci, in_wht, 
                            self.shift_wcs[self.nskip:], outputwcs=out_wcs, 
-                           kernel=kernel, pixfrac=pixfrac)
+                           kernel=kernel, pixfrac=pixfrac, verbose=False)
         
         head['EXPTIME'] = (self.EXPTIME, 'Total exposure time')
         
