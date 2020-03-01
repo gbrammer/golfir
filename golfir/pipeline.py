@@ -232,7 +232,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                     wht_i = im[0].data != 0
                     avg += im[0].data*wht_i
                     wht += wht_i
-
+                
+                im.close()
+                
             avg = avg/wht
             avg[wht == 0] = 0
 
@@ -520,7 +522,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
             out_header['NDRIZIM'] += 1
             out_header['EXPTIME'] += im[0].header['EXPTIME']
-
+            
+            im.close()
+            
         # Pixel scale factor for weights
         wht_scale = (out_wcs.pscale/wcs.pscale)**-4
 
