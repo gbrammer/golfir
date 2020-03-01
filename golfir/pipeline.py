@@ -192,12 +192,13 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             plt.ioff()
 
             if instrument != 'mips':
-                psf_size=20
                 ch_num = int(ch[-1])
                 segmask=True
-                for p in [0.1, final_pix]:
-                    irac.mosaic_psf(output_root=root_i, target_pix=p, channel=ch_num, aors=aors_ch[ch], kernel=kernel, pixfrac=pixfrac, size=psf_size, native_orientation=False, instrument=instrument, subtract_background=False, segmentation_mask=segmask, max_R=10)
-                    plt.close('all')
+
+                # psf_size=20
+                # for p in [0.1, final_pix]:
+                #     irac.mosaic_psf(output_root=root_i, target_pix=p, channel=ch_num, aors=aors_ch[ch], kernel=kernel, pixfrac=pixfrac, size=psf_size, native_orientation=False, instrument=instrument, subtract_background=False, segmentation_mask=segmask, max_R=10)
+                #     plt.close('all')
 
                 psf_size=30
                 p = 0.1
