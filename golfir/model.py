@@ -654,8 +654,15 @@ class ImageModeler(object):
         
         # IDs that touch the border
         self.patch_seg_sub = self.patch_seg[self.pf//2::self.pf, self.pf//2::self.pf].flatten()
-        self.patch_border_ids = np.unique(self.patch_seg_sub*(~self.patch_border_mask))[1:]
-        self.patch_ids_in_border = grizli.utils.column_values_in_list(self.patch_ids, self.patch_border_ids)
+        
+        # self.patch_border_ids = np.unique(self.patch_seg_sub*(~self.patch_border_mask))[1:]
+        # self.patch_ids_in_border = grizli.utils.column_values_in_list(self.patch_ids, self.patch_border_ids)
+
+        # IDs that fall out of the (bordered) patch
+        
+        patch_xyint = np.clip(np.cast[int](np.round(patch_xy)), 0, self.patch_shape[-1]-1)
+        self.patch_ids_in_border = ~self.patch_border_mask.reshape(self.patch_shape)[patch_xyint[:,1], patch_xyint[:,0]]
+        self.patch_border_ids = self.patch_ids[self.patch_ids_in_border]
         
         # Bright limits
         self.patch_bright_limits(**kwargs)
@@ -1240,8 +1247,8 @@ class ImageModeler(object):
 
         # Clip very negative measurements
         bad = flux < min_clip*err
-        flux[bad] = 0.
-        err[bad] = 2*err[bad]
+        flux[bad] = -99.*2
+        err[bad] = -99.*2
         
         phot = self.phot
         
