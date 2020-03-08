@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1'):
     
     from golfir import irac
     import golfir.utils
@@ -35,22 +35,22 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     
     # Fetch IRAC bcds
     if not os.path.exists('{0}_ipac.fits'.format(root)):
-        os.system('wget https://s3.amazonaws.com/grizli-v1/IRAC/{0}_ipac.fits'.format(root))
+        os.system('wget https://s3.amazonaws.com/{bucket}/IRAC/{0}_ipac.fits'.format(root))
     
     if not skip_fetch:
         res = golfir.utils.fetch_irac(root=root, path='./')
         
         if res in [False, None]:
             # Nothing to do
-            make_html(root)
+            make_html(root, bucket=bucket)
 
-            print(f'### Done: \n https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html')
+            print(f'### Done: \n https://s3.amazonaws.com/{bucket}/Pipeline/{root}/IRAC/{root}.irac.html')
 
             utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
             return True
             
     # Sync CHArGE HST images
-    os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
+    os.system(f'aws s3 sync s3://{bucket}/Pipeline/{root}/Prep/ ./ '
               f' --exclude "*" --include "{root}*seg.fits*"'
               f' --include "{root}-ir_drz*fits*"'
               f' --include "{root}*psf.fits*"'
@@ -69,7 +69,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         # Make sure pixels align
         ref_file = glob.glob('{0}-f[01]*_drz_sci.fits.gz'.format(root))
         if len(ref_file) == 0:
-            os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./ '
+            os.system(f'aws s3 sync s3://{bucket}/Pipeline/{root}/Prep/ ./ '
                       f' --exclude "*"'
                       f' --include "{root}-f[678]*_dr*fits.gz"')
             
@@ -583,11 +583,11 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     
     ######## Sync
     ## Sync
-    print(f's3://grizli-v1/Pipeline/{root}/IRAC/')
+    print(f's3://{bucket}/Pipeline/{root}/IRAC/')
     
-    make_html(root)
+    make_html(root, bucket=bucket)
     
-    os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/'
+    os.system(f'aws s3 sync ./ s3://{bucket}/Pipeline/{root}/IRAC/'
               f' --exclude "*" --include "{root}-ch*drz*fits*"'
               f' --include "{root}.*png"'
               ' --include "*-ch*psf*" --include "*log.fits"' 
@@ -596,13 +596,13 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
               ' --acl public-read')
     
     if sync_xbcd:
-        os.system('aws s3 sync ./ s3://grizli-v1/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
+        os.system('aws s3 sync ./ s3://{bucket}/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
-    msg = f'### Done: \n    https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/IRAC/{root}.irac.html'
+    msg = f'### Done: \n    https://s3.amazonaws.com/{bucket}/Pipeline/{root}/IRAC/{root}.irac.html'
         
     utils.log_comment(f'/tmp/{root}.success', msg, verbose=True, show_date=True)
     
-def make_html(root):
+def make_html(root, bucket='grizli-v1'):
     import time
     
     im = pyfits.open(glob.glob(f'{root}-ch*sci.fits*')[0])
@@ -622,10 +622,10 @@ def make_html(root):
 <h3> {root} IRAC ({time.ctime()})</h3>
 
 <p>
-<a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">CHArGE HST</a>
+<a href="https://s3.amazonaws.com/{bucket}/Pipeline/{root}/Prep/{root}.summary.html">CHArGE HST</a>
 <p> SHA <a href="{URL}">query</a>
 <p>
-<a href="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/grizli-v1/IRAC/{root}_ipac.png" height=400></a>
+<a href="https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.png"><img src="https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.png" height=400></a>
 
 <p>
 <a href="{root}.init.png"><img src="{root}.init.png" width=800></a>
