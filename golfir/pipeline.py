@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1']):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*'):
     
     from golfir import irac
     import golfir.utils
@@ -338,17 +338,17 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     bright_fmax = 0.5
     
     ### Drizzle
-    for ch in ['ch1', 'ch2', 'ch3', 'ch4', 'mips1']: #[:2]:
+    for ch in channels: #[:2]:
         ###########
         # Files and reference image for extra CR rejection
         if ch == 'mips1':
-            files = glob.glob('r*/ch1/bcd/SPITZER_M1_*xbcd.fits*'.format(ch))
+            files = glob.glob('{0}/ch1/bcd/SPITZER_M1_*xbcd.fits*'.format(drz_query, ch))
             files.sort()
             pulldown_mag = -10
             pixscale = 1.
             kernel = 'point'
         else:
-            files = glob.glob('r*/{0}/bcd/*_I?_*xbcd.fits*'.format(ch))
+            files = glob.glob('{0}/{1}/bcd/*_I?_*xbcd.fits*'.format(drz_query, ch))
             files.sort()
 
         #ref = pyfits.open('{0}-00-{1}_drz_sci.fits'.format(root, ch))
