@@ -139,8 +139,6 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     # Process mosaics by AOR
     # Process in groups, helps for fields like HFF with dozens/hundreds of AORs!
     for ch in channels:
-        if ch not in with_channels:
-            continue
             
         aor = aors[(aors['channel'] == ch) & (aors['N'] > 5)]
         if len(aor) == 0:
