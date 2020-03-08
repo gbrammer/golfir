@@ -38,6 +38,8 @@ from tqdm import tqdm
 # from golfir.utils import get_wcslist, _obj_shift
 # from golfir import irac
 
+BUCKET = 'grizli-v1'
+
 class model_psf(object):
     def __init__(self, psf_object, transform=None):
         self.psf_object = psf_object
@@ -141,22 +143,22 @@ class ImageModeler(object):
         Fetch data from AWS
         """
         
-        os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/IRAC/ ./')
-        os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./'
+        os.system(f'aws s3 sync s3://{BUCKET}/Pipeline/{root}/IRAC/ ./')
+        os.system(f'aws s3 sync s3://{BUCKET}/Pipeline/{root}/Prep/ ./'
                    ' --exclude "*"'
-                   ' --include "j*-ir*_[sw]??.fits.gz"'
-                   ' --include "j*-f1*_[sw]??.fits.gz"'
-                   ' --include "*psf.fits" --include "j*seg.fits.gz"'
-                   ' --include "j*phot.fits"')
+                   f' --include "{root}*-ir*_[sw]??.fits.gz"'
+                   f' --include "{root}*-f1*_[sw]??.fits.gz"'
+                   f' --include "*psf.fits" --include "{root}*seg.fits.gz"'
+                   f' --include "{root}*phot.fits"')
         
         os.system('gunzip -f *drz*fits.gz *seg.fits.gz')
         
         # Need ACS?
         wfc_files = glob.glob('j*-f1*sci.fits')
         if len(wfc_files) == 0:
-            os.system(f'aws s3 sync s3://grizli-v1/Pipeline/{root}/Prep/ ./'
+            os.system(f'aws s3 sync s3://{BUCKET}/Pipeline/{root}/Prep/ ./'
                        ' --exclude "*"'
-                       ' --include "j*-f[678]*_[sw]??.fits.gz"')
+                       ' --include "{root}*-f[678]*_[sw]??.fits.gz"')
 
             os.system('gunzip -f *_dr*fits.gz *seg.fits.gz')
             
@@ -1737,7 +1739,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             fp.close()
         
         # Sync
-        os.system(f'aws s3 sync ./ s3://grizli-v1/Pipeline/{root}/IRAC/ '
+        os.system(f'aws s3 sync ./ s3://{BUCKET}/Pipeline/{root}/IRAC/ '
                   f' --exclude "*" --include "{root}*model.fits"'
                   f' --include "{root}*irac*phot.fits"'
                   f' --include "{root}*components.fits"'
