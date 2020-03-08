@@ -1513,7 +1513,7 @@ class ImageModeler(object):
         # Save photometry & global model
         self.save_patch_results()
     
-    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f140w','f160w'], **kwargs):
+    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f160w','f140w', 'f125w', 'f110w'], **kwargs):
         """
         Generate patches to tile the field
         """
@@ -1523,9 +1523,13 @@ class ImageModeler(object):
         extra = 10./0.5 # extra padding, arcsec
         step = (2*patch_arcmin-patch_overlap)*60/0.5
         
-        valid = np.isfinite(self.phot['mag_auto'])
+        valid = ~np.isfinite(self.phot['mag_auto'])
         for filt in check_filters:
-            valid &= self.phot[f'{filt}_fluxerr_aper_1'] > 0
+            if f'{filt}_fluxerr_aper_1' in self.phot.colnames:
+                valid |= self.phot[f'{filt}_fluxerr_aper_1'] > 0
+        
+        if valid.sum() == 0:
+            valid = np.isfinite(self.phot['mag_auto'])
             
         if patch_arcmin < 0:
             size = 0.
