@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1'):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1']):
     
     from golfir import irac
     import golfir.utils
@@ -110,15 +110,14 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     ########
     min_frametime = 20
 
-    query = 'r*'
-    files = glob.glob('{0}/ch*/bcd/SPITZER_I*cbcd.fits'.format(query))
-    files += glob.glob('{0}/ch*/bcd/SPITZER_I*xbcd.fits.gz'.format(query))
-    files += glob.glob('{0}/ch*/bcd/SPITZER_M*ebcd.fits'.format(query))
+    files = glob.glob('{0}/ch*/bcd/SPITZER_I*cbcd.fits'.format(aor_query))
+    files += glob.glob('{0}/ch*/bcd/SPITZER_I*xbcd.fits.gz'.format(aor_query))
+    files += glob.glob('{0}/ch*/bcd/SPITZER_M*ebcd.fits'.format(aor_query))
     files.sort()
 
     roots = np.array([file.split('/')[0] for file in files])
-    channels = np.array([file.split('_')[1] for file in files])
-    all_roots = np.array(['{0}-{1}'.format(r, c.replace('I','ch').replace('M', 'mips')) for r, c in zip(roots, channels)])
+    with_channels = np.array([file.split('_')[1] for file in files])
+    all_roots = np.array(['{0}-{1}'.format(r, c.replace('I','ch').replace('M', 'mips')) for r, c in zip(roots, with_channels)])
 
     tab = {'aor':[], 'N':[], 'channel':[]}
     for r in np.unique(all_roots):
@@ -134,14 +133,15 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     delete_group = False # Delete intermediate products from memory
     zip_outputs = False    # GZip intermediate products
 
-    channels = ['ch1','ch2','ch3','ch4','mips1']
     aors_ch = {}
     
     ########
     # Process mosaics by AOR
     # Process in groups, helps for fields like HFF with dozens/hundreds of AORs!
     for ch in channels:
-
+        if ch not in with_channels:
+            continue
+            
         aor = aors[(aors['channel'] == ch) & (aors['N'] > 5)]
         if len(aor) == 0:
             continue
