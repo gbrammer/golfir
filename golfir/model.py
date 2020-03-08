@@ -1513,7 +1513,7 @@ class ImageModeler(object):
         # Save photometry & global model
         self.save_patch_results()
     
-    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, **kwargs):
+    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f140w','f160w'], **kwargs):
         """
         Generate patches to tile the field
         """
@@ -1524,18 +1524,21 @@ class ImageModeler(object):
         step = (2*patch_arcmin-patch_overlap)*60/0.5
         
         valid = np.isfinite(self.phot['mag_auto'])
-        
+        for filt in check_filters:
+            valid &= self.phot[f'{filt}_fluxerr_aper_1'] > 0
+            
         if patch_arcmin < 0:
             size = 0.
             pad = 10
+            #extra = 0
             
-        xmin = np.maximum(self.lores_xy[valid,0].min()+size-extra, pad)
-        xmax = np.minimum(self.lores_xy[valid,0].max(),  
-                          self.lores_shape[1]-pad)
+        xmin = np.maximum(self.lores_xy[valid,0].min()+size-extra-pad, 10)
+        xmax = np.minimum(self.lores_xy[valid,0].max()+extra+pad,  
+                          self.lores_shape[1]-10)
         
-        ymin = np.maximum(self.lores_xy[valid,1].min()+size-extra, pad)
-        ymax = np.minimum(self.lores_xy[valid,1].max(), 
-                          self.lores_shape[0]-pad)
+        ymin = np.maximum(self.lores_xy[valid,1].min()+size-extra-pad, 10)
+        ymax = np.minimum(self.lores_xy[valid,1].max()+extra+pad, 
+                          self.lores_shape[0]-10)
         
         if patch_arcmin < 0:
             # Single patch
@@ -1545,7 +1548,8 @@ class ImageModeler(object):
             rp, dp = self.lores_wcs.all_pix2world(xp[:1].flatten(), yp[:1].flatten(), 0)
             
             cosd = np.cos(dp[0]/180*np.pi)
-            patch_arcmin = np.maximum((xmax-xmin)*cosd*60, (ymax-ymin)*60)
+            patch_arcmin = np.maximum((xmax-xmin)*0.5/60/2., 
+                                      (ymax-ymin)*0.5/60/2.)
             
         else:    
             xp, yp = np.meshgrid(np.arange(xmin, xmax+size, step), np.arange(ymin, ymax+size, step))
@@ -1658,8 +1662,17 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
         if os.path.exists(patch_file):
             tab = grizli.utils.read_catalog(patch_file)
         else:
+            auto = kwargs['patch_arcmin'] < 0
             tab = self.generate_patches(**kwargs)
-    
+            if (len(tab) in [2,4]) & (kwargs['patch_arcmin'] == 1):
+                kwargs['patch_arcmin'] = 1.55
+                tab = self.generate_patches(**kwargs)
+            
+            if auto & (tab[0]['patch_arcmin'] > 1.7):
+                kwargs['patch_arcmin'] = 1.0
+                tab = self.generate_patches(**kwargs)
+                
+            
         for k in ['patch_arcmin', 'rd_patch', 'patch_id']:
             if k in kwargs:
                 _ = kwargs.pop(k)
