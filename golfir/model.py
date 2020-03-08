@@ -1523,11 +1523,14 @@ class ImageModeler(object):
         extra = 10./0.5 # extra padding, arcsec
         step = (2*patch_arcmin-patch_overlap)*60/0.5
         
-        valid = ~np.isfinite(self.phot['mag_auto'])
+        valid = np.zeros(len(self.phot['mag_auto']), dtype=bool)
         for filt in check_filters:
             if f'{filt}_fluxerr_aper_1' in self.phot.colnames:
-                valid |= self.phot[f'{filt}_fluxerr_aper_1'] > 0
-        
+                test = self.phot[f'{filt}_fluxerr_aper_1'] > 0
+                test &= np.isfinite(self.phot[f'{filt}_fluxerr_aper_1'])
+                
+                valid |= test
+                
         if valid.sum() == 0:
             valid = np.isfinite(self.phot['mag_auto'])
             
