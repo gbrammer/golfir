@@ -1669,10 +1669,12 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             auto = kwargs['patch_arcmin'] < 0
             tab = self.generate_patches(**kwargs)
             if (len(tab) in [2,4]) & (kwargs['patch_arcmin'] == 1):
+                print('2x2 grid found, make single patch')
                 kwargs['patch_arcmin'] = 1.55
                 tab = self.generate_patches(**kwargs)
             
             if auto & (tab[0]['patch_arcmin'] > 1.7):
+                print('large grid found ({0}, make single patch'.format(tab[0]['patch_arcmin']))
                 kwargs['patch_arcmin'] = 1.0
                 tab = self.generate_patches(**kwargs)
                 
