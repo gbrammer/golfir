@@ -660,6 +660,7 @@ class ImageModeler(object):
 
         # IDs that fall out of the (bordered) patch
         
+        patch_xy = patch_xy[keep,:]
         patch_xyint = np.clip(np.cast[int](np.round(patch_xy)), 0, self.patch_shape[-1]-1)
         self.patch_ids_in_border = ~self.patch_border_mask.reshape(self.patch_shape)[patch_xyint[:,1], patch_xyint[:,0]]
         self.patch_border_ids = self.patch_ids[self.patch_ids_in_border]
@@ -1235,9 +1236,16 @@ class ImageModeler(object):
         h['DY_'+pk] = (self.patch_transform[1], 'Patch y shift')
         h['ROT_'+pk] = (self.patch_transform[2], 'Patch rot')
         h['SCL_'+pk] = (self.patch_transform[3], 'Patch scale')
+        h['EXTNAME'] = 'MODEL'
         
-        pyfits.writeto(model_image, data=self.full_model, header=h, 
-                       overwrite=True)
+        hdul = pyfits.HDUList()
+        hdul.append(pyfits.PrimaryHDU(data=self.full_model, header=h))
+        resid = (self.lores_im.data - self.full_model)
+        hdul.append(pyfits.ImageHDU(data=resid, header=h, name='RESID'))
+        del(resid)
+        
+        hdul.writeto(model_image, overwrite=True)
+        
         
         ################
         # Fluxes and uncertainties from the least squares fit
@@ -1576,6 +1584,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
     import golfir.model
     
     if True:
+        
         try:
             os.chdir(PATH)
         except:
@@ -1671,7 +1680,8 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
                             kwargs['galfit_flux_limit'] = 100
                     else:
                         kwargs['galfit_flux_limit'] = None
-                        
+                
+                print('####################\n\nRun {0} patch {1}/{2}\n\n####################'.format(ch, i+1, N))        
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
                 models[ch] = self
             except:
