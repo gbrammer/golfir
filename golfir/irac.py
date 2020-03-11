@@ -1396,7 +1396,12 @@ class IracPSF(object):
             msk = []
             for k in psf_data:
                 theta = np.mean(psf_data[k]['log']['theta'])
-                warped = warp_image(np.array([0,0,-theta,1]), avg_psf)
+                try:
+                    warped = warp_image(np.array([0,0,-theta,1]), avg_psf)
+                except ValueError:
+                    avg_psf = avg_psf.byteswap().newbyteorder()
+                    warped = warp_image(np.array([0,0,-theta,1]), avg_psf)
+                    
                 img.append(warped.flatten()/warped.sum())
                 msk.append(img[-1] != 0)
                 
