@@ -18,11 +18,12 @@ version = "0.1" # init
 # Set this to true to add install_requires to setup
 if True:
     install_requires=[
-         'astropy>=2.0.0',
-         'photutils>=0.3.0',
+         'astropy>=4.0',
+         'photutils>=0.7.0',
          'lxml>=3.8.0',
-         'numpy>=1.10.2',
-         'matplotlib>=2.0.2']
+         'numpy>=1.17.0',
+         'matplotlib>=3.0',
+         'tqdm>=4.0']
 else:
     install_requires = []    
     
