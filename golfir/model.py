@@ -50,7 +50,7 @@ class model_psf(object):
         
 class ImageModeler(object):
     
-    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, **kwargs):
+    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, **kwargs):
         self.root = root
         self.LOGFILE=f'{root}.modeler.log.txt'
         self.verbose = verbose
@@ -67,10 +67,18 @@ class ImageModeler(object):
         self.read_hst_data(prefer_filter=prefer_filter)
         
         # Dilate seg image
-        self.watershed_segmentation()
+        if os.path.exists(f'{root}_waterseg.fits'):
+            msg = f'Read {root}_waterseg.fits'
+            grizli.utils.log_comment(self.LOGFILE, msg, 
+                   verbose=self.verbose, show_date=True)
+
+            w = pyfits.open(f'{root}_waterseg.fits')
+            self.waterseg = w[0].data*1
+        else:
+            self.watershed_segmentation()
         
         # Read Low-res (IRAC) data
-        self.read_lores_data(filter=lores_filter)
+        self.read_lores_data(filter=lores_filter, use_avg_psf=use_avg_psf)
         
         # Initialize PSFs
         self.init_psfs(**kwargs)
@@ -200,6 +208,11 @@ class ImageModeler(object):
 
         hst_seg = pyfits.open(self.root+'-ir_seg.fits')[0]
         hst_ujy = hst_im[0].data*hst_im[0].header['PHOTFNU'] * 1.e6
+        
+        bad = ~np.isfinite(hst_ujy)
+        hst_wht[0].data[bad] = 0
+        hst_ujy[bad] = 0
+        
         hst_wcs = pywcs.WCS(hst_im[0].header)
         hst_wcs.pscale = grizli.utils.get_wcs_pscale(hst_wcs)
 
@@ -262,9 +275,10 @@ class ImageModeler(object):
         yi = np.cast[int](np.round(self.phot['ypeak']))
         markers = np.zeros(self.hst_im[0].data.shape, dtype=int)
         markers[yi, xi] = self.phot['number']
-
+        
         waterseg = watershed(-hst_conv, markers, mask=(hst_conv/np.sqrt(hst_cvar) > 1))
         waterseg[waterseg == 0] = self.hst_seg.data[waterseg == 0]
+        
         self.waterseg = waterseg
         
     def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None):
@@ -279,20 +293,29 @@ class ImageModeler(object):
         
         ################
         # Parameters for IRAC fitting
-        if use_avg_psf & (filter in ['ch1','ch2','ch3','ch4']):
-            #avg_psf = pyfits.open('{0}-{1}-0.1.psfr_avg.fits'.format(self.root, filter))[0].data
-            _path = os.path.dirname(irac.__file__)
+        if (use_avg_psf > 0) & (filter in ['ch1','ch2','ch3','ch4']):
             
-            if 0:
-                # My stacked psfs
-                psf_file = os.path.join(_path, 
-                                    f'data/psf/irac_{filter}_cold_psf.fits')
+            if use_avg_psf > 1:
+                psf_file = f'{self.root}-{filter}-0.1.psfr_avg.fits'
+                #avg_psf = pyfits.open(psf_file)[0].data
             else:
-                # Generated from IRSA PRFs
-                psf_file = os.path.join(_path, 
+                    
+                _path = os.path.dirname(irac.__file__)
+            
+                if 0:
+                    # My stacked psfs
+                    psf_file = os.path.join(_path, 
+                                      f'data/psf/irac_{filter}_cold_psf.fits')
+                else:
+                    # Generated from IRSA PRFs
+                    psf_file = os.path.join(_path, 
                                     f'data/psf/irsa_0.1pix_{filter}_psf.fits')
             
             avg_psf = pyfits.open(psf_file)[0].data
+            
+            # Recenter
+            if (filter == 'ch1') & ('irsa' in psf_file):
+                avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
             
             grizli.utils.log_comment(self.LOGFILE, 
                    f'Read avg psf: {psf_file}\n',
@@ -494,7 +517,7 @@ class ImageModeler(object):
             if 'RA_{0:03d}'.format(self.patch_id) in mh:
                 rd = (mh['RA_{0:03d}'.format(self.patch_id)], 
                       mh['DEC_{0:03d}'.format(self.patch_id)])
-                if np.array(self.patch_rd-np.array(rd)).sum() > 1.e-5:
+                if np.abs(self.patch_rd-np.array(rd)).max() > 1.e-5:
                     self.patch_transform = np.array([0., 0., 0., 1.])
                 else:
                     tf = [mh[f'DX_{self.patch_id:03d}'],
@@ -1137,7 +1160,7 @@ class ImageModeler(object):
             gf = _fitter.fit_arrays(sci_cleaned, ivar*segmap, segmap*1, 
                                 galfit_psf, psf_sample=psf_sample, id=1, 
                                 components=components, recenter=False, 
-                                exptime=0, path=os.getcwd(), root=gf_root)
+                                exptime=0, path='./', root=gf_root)
             
             chi2_final = (gf['resid'].data**2*ivar)[segmap].sum()
 
@@ -1583,9 +1606,9 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
 
-RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None} 
+RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None, 'use_avg_psf':True} 
       
-def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, **kwargs):
+def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, display_mosaics=True, **kwargs):
     """
     Generate and run all patches
     """
@@ -1624,7 +1647,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             psf[0].data = psf[0].data**(scl[ch])
             psf.writeto(f'{root}-{ch}-0.1.psfr_avg.fits', overwrite=True)
             
-    if ds9:
+    if (ds9 is not None) & (display_mosaics):
         PWD = os.getcwd()
         ds9.frame(1)
         ds9.set(f'file {PWD}/{root}-ir_drz_sci.fits')
