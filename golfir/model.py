@@ -499,7 +499,7 @@ class ImageModeler(object):
         mask_file = '{0}-{1}_mask.reg'.format(self.root, self.lores_filter)
         if os.path.exists(mask_file):
             import pyregion
-            reg = pyregion.open('j055324m3342-ch1_mask.reg')
+            reg = pyregion.open(mask_file)
             
             grizli.utils.log_comment(self.LOGFILE, 
                    f'Use region mask: {mask_file}',
