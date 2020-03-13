@@ -34,8 +34,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     os.chdir(PATH)
     
     # Fetch IRAC bcds
-    if not os.path.exists('{0}_ipac.fits'.format(root)):
-        os.system('wget https://s3.amazonaws.com/{bucket}/IRAC/{0}_ipac.fits'.format(root))
+    if not os.path.exists(f'{root}_ipac.fits'):
+        os.system(f'wget https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.fits')
     
     if not skip_fetch:
         res = golfir.utils.fetch_irac(root=root, path='./')
