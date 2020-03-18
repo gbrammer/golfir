@@ -182,6 +182,9 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 
             seg_wcs = pywcs.WCS(seg.header)
             seg_wcs.pscale = utils.get_wcs_pscale(seg_wcs)
+            if (not hasattr(seg_wcs, '_naxis1')) & hasattr(seg_wcs, '_naxis'):
+                seg_wcs._naxis1, seg_wcs._naxis2 = seg_wcs._naxis
+                
             for i, aor in enumerate(aors):
                 print('\n {0} {1} \n'.format(i, aor))
                 blot_seg = aors[aor].blot(seg_wcs, seg.data, interp='poly5')

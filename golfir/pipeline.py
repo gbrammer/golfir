@@ -374,6 +374,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
         ref_wcs = pywcs.WCS(ref[0].header, relax=True) 
         ref_wcs.pscale = utils.get_wcs_pscale(ref_wcs) 
+        if (not hasattr(ref_wcs, '_naxis1')) & hasattr(ref_wcs, '_naxis'):
+            ref_wcs._naxis1, ref_wcs._naxis2 = ref_wcs._naxis
 
         ##############
         # Output WCS based on HST footprint
@@ -405,6 +407,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             out_wcs.pscale = utils.get_wcs_pscale(out_wcs) 
             
             out_header = utils.to_header(out_wcs)
+        
+        if (not hasattr(out_wcs, '_naxis1')) & hasattr(out_wcs, '_naxis'):
+            out_wcs._naxis1, out_wcs._naxis2 = out_wcs._naxis
             
         ##############
         # Bright stars for pulldown correction
@@ -445,6 +450,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
             wcs = pywcs.WCS(im['WCS'].header, relax=True)
             wcs.pscale = utils.get_wcs_pscale(wcs)
+            if (not hasattr(wcs, '_naxis1')) & hasattr(wcs, '_naxis'):
+                wcs._naxis1, wcs._naxis2 = wcs._naxis
+            
             fp = Path(wcs.calc_footprint())
 
             med_root_i = im.filename().split('/')[0]
@@ -458,7 +466,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                     gaia_rd = utils.read_catalog('{0}-{1}_gaia.radec'.format(med_root_i, ch))
                     ii, rr = gaia_rd.match_to_catalog_sky(ph)
                     gaia_rd = gaia_rd[ii][rr.value < 2]
-                    gaia_pts = np.array([gaia_rd['ra'].data, gaia_rd['dec'].data]).T
+                    gaia_pts = np.array([gaia_rd['ra'].data, 
+                                         gaia_rd['dec'].data]).T
                 except:
                     gaia_rd = []
 
@@ -477,8 +486,10 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                 # to_ujy_px = un.to(u.uJy/u.arcsec**2).value*(native_scale**2)
                 to_ujy_px = 35.17517196810
 
-            blot_data = ablot.do_blot(ref_data, ref_wcs, wcs, 1, coeffs=True, interp=blot_interp, 
-                                      sinscl=1.0, stepsize=10, wcsmap=None)/to_ujy_px
+            blot_data = ablot.do_blot(ref_data, ref_wcs, wcs, 1, coeffs=True, 
+                                      interp=blot_interp, 
+                                      sinscl=1.0, stepsize=10, 
+                                      wcsmap=None)/to_ujy_px
 
             # mask for bright stars
             eblot = 1-np.clip(blot_data, 0, bright_fmax)/bright_fmax
