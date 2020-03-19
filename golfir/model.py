@@ -1169,7 +1169,8 @@ class ImageModeler(object):
                 ds9.view(gf['resid'].data*segmap, header=self.patch_header)
             
         except:
-            grizli.utils.log_exception('galfit.failed', traceback, verbose=True)
+            grizli.utils.log_exception('galfit.failed', traceback, 
+                                       verbose=True)
             chi2_final = 1e30
             gf = None
             
@@ -1688,6 +1689,8 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
         try:
             self = golfir.model.ImageModeler(root=root, lores_filter=ch, **kwargs) 
         except:
+            LOGFILE=f'{root}.modeler.log.txt'
+            grizli.utils.log_exception(LOGFILE, traceback, verbose=True)
             continue
             
         patch_file = f'{self.root}_patch.fits'
@@ -1732,8 +1735,10 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
                 models[ch] = self
             except:
-                pass
-    
+                LOGFILE=f'{root}.modeler.log.txt'
+                grizli.utils.log_exception(LOGFILE, traceback, verbose=True)
+                continue
+                
     # Add to HTML
     if sync_results:
         resid_images = glob.glob(f"{root}_*_*png")
