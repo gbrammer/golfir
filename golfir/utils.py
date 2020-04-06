@@ -17,24 +17,73 @@ from . import irac
 # except:
 #     ds9 = None
     
-def fetch_irac(root='j003528m2016', path='./'):
+def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'], force_hst_overlap=True):
+    """
+    Fetch IRAC and MIPS images listed in a `ipac.fits` catalog generated 
+    by `mastquery`.
+    """
     ipac = utils.read_catalog(path+'{0}_ipac.fits'.format(root))
+    
+    ch_trans = {'ch1': 'IRAC 3.6um',
+                'ch2': 'IRAC 4.5um',
+                'ch3': 'IRAC 5.8um',
+                'ch4': 'IRAC 8.0um',
+                'mips1': 'MIPS 24um',
+                'mips2': 'MIPS 70um',
+                'mips3': 'MIPS 160um'}
     
     # Overlaps
     ext = np.array([e.split('/')[0] for e in ipac['externalname']])
-    ext_list = np.unique(ext[ipac['with_hst']])
-    
+    if 'with_hst' in ipac.colnames:
+        ext_list = np.unique(ext[ipac['with_hst']])
+    else:
+        ext_list = np.unique(ext)
+        
     inst = np.array([e.split(' ')[0] for e in ipac['wavelength']])
     
-    keep = (inst == 'IRAC') & (utils.column_values_in_list(ext, ext_list))
+    keep = ipac['ra'] < -1e10
     
+    for ch in channels:
+        if ch not in ch_trans:
+            continue
+        
+        if ch.startswith('mips'):
+            # Only EBCD MIPS files
+            test = ipac['wavelength'] == ch_trans[ch]
+            ebcd = utils.column_string_operation(ipac['externalname'], 
+                                                  '_ebcd', 'count','or')
+            keep |= test & ebcd
+        else:
+            keep |= ipac['wavelength'] == ch_trans[ch]
+        
+        #(inst == 'IRAC')
+    
+    # All exposures of an AOR that overlaps at at
+    if force_hst_overlap:
+        keep &= utils.column_values_in_list(ext, ext_list)
+    
+    # Explicit overlap for every exposure
+    if force_hst_overlap > 1:
+        if 'with_hst' in ipac.colnames:
+            keep &= ipac['with_hst'] > 0
+
     if keep.sum() == 0:
+        msg = """No matching exposures found for:
+        root={0}
+        channels={1}
+        force_hst_overlap={2}"""
+        print(msg.format(root, channels, force_hst_overlap))
         return False
                 
     so = np.argsort(ipac['externalname'][keep])
     idx = np.arange(len(ipac))[keep][so]
     
-    print('\n\n==================\n Fetch {0} files \n==================\n\n'.format(keep.sum()))
+    un, ct = np.unique(ipac['wavelength'][keep], return_counts=True)
+    print('\n\n#==================\n# Fetch {0} files'.format(keep.sum()))
+    print('#=================='.format(keep.sum()))
+    for w, n in zip(un, ct):
+        print('# {0:10} {1:>5}'.format(w, n))
+    print('#==================\n\n'.format(keep.sum()))
     
     N = keep.sum()
     
@@ -48,6 +97,7 @@ def fetch_irac(root='j003528m2016', path='./'):
             continue
             
         xbcd = glob.glob(ipac['externalname'][i].replace('_bcd.fits', '_xbcd.fits.gz'))
+        xbcd += glob.glob(ipac['externalname'][i].replace('_ebcd.fits', '_xbcd.fits.gz'))
         if len(xbcd) > 0:
             print('XBCD ({0:>4} / {1:>4}): {2}'.format(ix, N, xbcd[0]))
             continue
@@ -68,7 +118,7 @@ def fetch_irac(root='j003528m2016', path='./'):
     #     os.system('unzip -n {0}'.format(out))
     
     return ipac[keep]
-    
+ 
 def get_wcslist(query='r*', skip=10):
     import glob
     import astropy.io.fits as pyfits
@@ -1628,3 +1678,27 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     drz_psf = (_drz[0]*coswindow) / (_drz[0]*coswindow).sum()     
               
     pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_psf.fits', data=drz_psf, overwrite=True)
+    
+def recenter_psfs():
+    
+    import astropy.io.fits as pyfits
+    pa = pyfits.open('cos-grism-j100012p0210-ch1-0.1.psfr_avg.fits') 
+    pash = pa[0].data.shape
+    xpa, ypa = np.indices(pash)
+    xca = (pa[0].data*xpa).sum()/pa[0].data.sum()
+    yca = (pa[0].data*ypa).sum()/pa[0].data.sum()
+    
+    pi = pyfits.open('/usr/local/share/python/golfir/golfir/data/psf/irsa_0.1pix_ch1_psf.fits')[0].data
+    
+    #pi = irac.warp_image(np.array([-2., -2]), pi)
+    pi = np.roll(np.roll(pi, -2, axis=0), -2, axis=1)
+
+    pish = pi.shape
+    xpi, ypi = np.indices(pish)
+    xci = (pi*xpi).sum()/pi.sum()
+    yci = (pi*ypi).sum()/pi.sum()
+    
+    print(xca, yca, pash)
+    print(xci, yci, pish)
+    
+    
