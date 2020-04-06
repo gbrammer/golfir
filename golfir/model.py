@@ -357,7 +357,7 @@ class ImageModeler(object):
             # Integer ratio of pixel sizes between IRAC and HST
             try:
                 irac_wcs = pywcs.WCS(irac_im.header)
-                irac_wcs.pscale = utils.get_wcs_pscale(irac_wcs)
+                irac_wcs.pscale = grizli.utils.get_wcs_pscale(irac_wcs)
                 pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
             except:
                 pf = 5
@@ -1719,7 +1719,13 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
             N = 1
             patches = [None]
         else:
-            patches = [(tab['ra'][i], tab['dec'][i]) for i in range(N)]
+            if isinstance(use_patches, list):
+                patch_list = use_patches
+            else:
+                patch_list = range(N)
+            
+            N = len(patch_list)    
+            patches = [(tab['ra'][i], tab['dec'][i]) for i in patch_list]
             
         for i in range(N):
             try:
