@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*'):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True):
     
     from golfir import irac
     import golfir.utils
@@ -32,12 +32,12 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         pass
 
     os.chdir(PATH)
-    
-    # Fetch IRAC bcds
-    if not os.path.exists(f'{root}_ipac.fits'):
-        os.system(f'wget https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.fits')
-    
+        
     if not skip_fetch:
+        # Fetch IRAC bcds
+        if not os.path.exists(f'{root}_ipac.fits'):
+            os.system(f'wget https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.fits')
+    
         res = golfir.utils.fetch_irac(root=root, path='./')
         
         if res in [False, None]:
@@ -587,28 +587,29 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     fig.savefig(f'{root}.final.png')
     plt.close('all')
     
-    print('gzip mosaics')
-    os.system(f'gzip -f {root}-ch*_drz*fits')
+    if sync_results:
+        print('gzip mosaics')
+        os.system(f'gzip -f {root}-ch*_drz*fits')
     
-    ######## Sync
-    ## Sync
-    print(f's3://{bucket}/Pipeline/{root}/IRAC/')
+        ######## Sync
+        ## Sync
+        print(f's3://{bucket}/Pipeline/{root}/IRAC/')
     
-    make_html(root, bucket=bucket)
+        make_html(root, bucket=bucket)
     
-    os.system(f'aws s3 sync ./ s3://{bucket}/Pipeline/{root}/IRAC/'
-              f' --exclude "*" --include "{root}-ch*drz*fits*"'
-              f' --include "{root}.*png"'
-              ' --include "*-ch*psf*" --include "*log.fits"' 
-              ' --include "*wcs.[lp]*"'
-              ' --include "*html" --include "*fail*"'
-              ' --acl public-read')
+        os.system(f'aws s3 sync ./ s3://{bucket}/Pipeline/{root}/IRAC/'
+                  f' --exclude "*" --include "{root}-ch*drz*fits*"'
+                  f' --include "{root}.*png"'
+                  ' --include "*-ch*psf*" --include "*log.fits"' 
+                  ' --include "*wcs.[lp]*"'
+                  ' --include "*html" --include "*fail*"'
+                  ' --acl public-read')
     
-    if sync_xbcd:
-        os.system('aws s3 sync ./ s3://{bucket}/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
+        if sync_xbcd:
+            os.system('aws s3 sync ./ s3://{bucket}/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
     
     msg = f'### Done: \n    https://s3.amazonaws.com/{bucket}/Pipeline/{root}/IRAC/{root}.irac.html'
-        
+       
     utils.log_comment(f'/tmp/{root}.success', msg, verbose=True, show_date=True)
     
 def make_html(root, bucket='grizli-v1'):
