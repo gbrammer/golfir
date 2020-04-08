@@ -19,7 +19,7 @@ from drizzlepac.astrodrizzle import ablot
 
 from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':10, 'mips':1.0}):
     
     from golfir import irac
     import golfir.utils
@@ -67,13 +67,13 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         out_hdu = utils.make_maximal_wcs(wcslist, pixel_scale=initial_pix, theta=0, pad=5, get_hdu=True, verbose=True)
 
         # Make sure pixels align
-        ref_file = glob.glob('{0}-f[01]*_drz_sci.fits.gz'.format(root))
+        ref_file = glob.glob('{0}-f[01]*_drz_sci.fits*'.format(root))
         if len(ref_file) == 0:
             os.system(f'aws s3 sync s3://{bucket}/Pipeline/{root}/Prep/ ./ '
                       f' --exclude "*"'
                       f' --include "{root}-f[678]*_dr*fits.gz"')
             
-            ref_file = glob.glob('{0}-f[678]*_dr*_sci.fits.gz'.format(root))
+            ref_file = glob.glob('{0}-f[678]*_dr*_sci.fits*'.format(root))
         
         ref_file = ref_file[-1]
 
@@ -108,7 +108,6 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         out_hdu = pyfits.open('ref_hdu.fits')[1]
     
     ########
-    min_frametime = 20
 
     files = glob.glob('{0}/ch*/bcd/SPITZER_I*cbcd.fits'.format(aor_query))
     files += glob.glob('{0}/ch*/bcd/SPITZER_I*xbcd.fits.gz'.format(aor_query))
@@ -147,13 +146,14 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         #aors_ch[ch] = []
 
         if ch in ['ch1','ch2']:
-            NPER, instrument, min_frametime = 500, 'irac', 10
+            NPER, instrument = 500, 'irac'
         if ch in ['ch3','ch4']:
-            NPER, instrument, min_frametime = 500, 'irac', 10
-            #NPER, instrument, min_frametime = 800, 'irac', 20
+            NPER, instrument = 500, 'irac'
         elif ch in ['mips1']:
-            NPER, instrument, min_frametime, pix = 400, 'mips', 2, 1.0
-
+            NPER, instrument, pix = 400, 'mips'
+        
+        min_frametime = min_frame[instrument]
+        
         nsort = np.cumsum(aor['N']/NPER)
         NGROUP = int(np.ceil(nsort.max()))
 
@@ -179,9 +179,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
             # Pipeline
             if instrument == 'mips':
-                aors_ch[ch] = irac.process_all(channel=ch.replace('mips','ch'), output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, align_threshold=0.15, radec=radec, run_alignment=False, mips_ext='_ebcd.fits')
+                aors_ch[ch] = irac.process_all(channel=ch.replace('mips','ch'), output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, align_threshold=0.15, radec=radec, run_alignment=False, mips_ext='_ebcd.fits', ref_seg=ref_seg, global_mask=root+'_mask.reg')
             else:
-                aors_ch[ch] = irac.process_all(channel=ch, output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, radec=radec, run_alignment=run_alignment, assume_close=assume_close)
+                aors_ch[ch] = irac.process_all(channel=ch, output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, radec=radec, run_alignment=run_alignment, assume_close=assume_close, ref_seg=ref_seg, global_mask=root+'_mask.reg')
 
             if len(aors_ch[ch]) == 0:
                 continue
@@ -279,7 +279,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         ax.imshow(im[0].data, vmin=-0.1, vmax=1, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
-
+        
+        im.close()
+        
     if len(files) > 1:
         fig.axes[1].set_yticklabels([])
     
@@ -461,7 +463,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                 med = pyfits.open('{0}-{1}_med.fits'.format(med_root_i, ch))
                 med_data = med[0].data.astype(np.float32)
                 med_root = med_root_i
-
+                med.close()
+                
                 try:
                     gaia_rd = utils.read_catalog('{0}-{1}_gaia.radec'.format(med_root_i, ch))
                     ii, rr = gaia_rd.match_to_catalog_sky(ph)
@@ -495,7 +498,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             eblot = 1-np.clip(blot_data, 0, bright_fmax)/bright_fmax
 
             # Initial CR
-            clean = im[0].data - med[0].data - im['WCS'].header['PEDESTAL']
+            clean = im[0].data - med_data - im['WCS'].header['PEDESTAL']
             dq = (clean - blot_data)*np.sqrt(ivar)*eblot > driz_cr[0]
 
             # Adjacent CRs
@@ -572,7 +575,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         ax.imshow(im[0].data, vmin=-0.1*scl, vmax=1*scl, cmap='gray_r', origin='lower')
         ax.text(0.05, 0.95, file, ha='left', va='top', color='k', 
                 transform=ax.transAxes)
-
+        
+        im.close()
+        
     if len(files) > 1:
         fig.axes[1].set_yticklabels([])
     

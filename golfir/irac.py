@@ -17,7 +17,7 @@ import astropy.units as u
 
 from grizli import utils, prep
 
-def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True):
+def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True, global_mask=''):
     """
     """
     import glob
@@ -179,11 +179,19 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 seg = pyfits.open('{0}_seg.fits'.format(irac_root))[0]
             else:
                 seg = ref_seg
-                
+            
             seg_wcs = pywcs.WCS(seg.header)
             seg_wcs.pscale = utils.get_wcs_pscale(seg_wcs)
             if (not hasattr(seg_wcs, '_naxis1')) & hasattr(seg_wcs, '_naxis'):
                 seg_wcs._naxis1, seg_wcs._naxis2 = seg_wcs._naxis
+            
+            #mask_file = '{0}_mask.reg'.format(output_root)
+            if os.path.exists(global_mask):
+                import pyregion
+                print('Additional mask from {0}'.format(global_mask))
+                mask_reg = pyregion.open(global_mask)
+                mask_im = mask_reg.get_mask(hdu=seg)
+                seg.data += mask_im*1
                 
             for i, aor in enumerate(aors):
                 print('\n {0} {1} \n'.format(i, aor))
@@ -350,45 +358,51 @@ class IracAOR():
             _res = read_xbcd(file)
             return _res
         
-        im = pyfits.open(file)
-        hdu = im[0]
-        cbcd = im[0].data
-        cbunc = pyfits.open(file.replace('bcd.', 'bunc.'))[0].data
+        with pyfits.open(file) as im:
+            cbcd = im[0].data.astype(np.float32)
+            wcs = pywcs.WCS(im[0].header)
+            wcs.pscale = utils.get_wcs_pscale(wcs)
+        
+        with pyfits.open(file.replace('bcd.', 'bunc.')) as hdul:
+            cbunc = hdul[0].data.astype(np.float32)
         
         if instrument == 'irac':
-            bimsk =pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data 
+            bimsk_file = file.replace('_cbcd','_bcd')
+            bimsk_file = bimsk_file.replace('bcd.', 'bimsk.')
         else:
-            bimsk = pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data
+            bimsk_file = file.replace('_cbcd','_bcd')
+            bimsk_file = bimsk_file.replace('bcd.', 'bbmsk.')
+            bimsk_file = bimsk_file.replace('_ebb','_eb')
+        
+        with pyfits.open(bimsk_file) as hdul:
+            bimsk = hdul[0].data.astype(np.float32)
         
         brmsk = np.zeros(bimsk.shape, dtype=np.int16)
         if use_brmsk:
             rmsk_file =  file.replace('bcd.', 'brmsk.')
             if os.path.exists(rmsk_file):
-                brmsk = pyfits.open(rmsk_file)[0].data     
-                    
-        wcs = pywcs.WCS(im[0].header)
-        wcs.pscale = utils.get_wcs_pscale(wcs)
-        
-        return hdu, cbcd, cbunc, bimsk, brmsk, wcs
+                with pyfits.open(rmsk_file) as hdul:
+                    brmsk = hdul[0].data.astype(np.int16)
+                            
+        return None, cbcd, cbunc, bimsk, brmsk, wcs
         
     @staticmethod
     def read_xbcd(file):
-        im = pyfits.open(file)
-        hdu = im['CBCD']
-        cbcd = im['CBCD'].data
-        cbunc = im['CBUNC'].data
-        bimsk = im['WCS'].data
+        with pyfits.open(file) as im:
+            cbcd = im['CBCD'].data.astype(np.float32)
+            cbunc = im['CBUNC'].data.astype(np.float32)
+            bimsk = im['WCS'].data.astype(np.int16)
         
-        wcs = pywcs.WCS(im['WCS'].header)
-        wcs.pscale = utils.get_wcs_pscale(wcs)
+            wcs = pywcs.WCS(im['WCS'].header)
+            wcs.pscale = utils.get_wcs_pscale(wcs)
         
-        return hdu, cbcd, cbunc, bimsk, bimsk*1, wcs
+        return None, cbcd, cbunc, bimsk, bimsk*1, wcs
         
     def read_files(self, use_brmsk=True, min_frametime=20):
         
-        self.hdu = [pyfits.open(file)[0] for file in self.files]
+        self.hdu = [pyfits.open(file) for file in self.files]
         for i in  np.arange(len(self.hdu))[::-1]:
-            if self.hdu[i].header['EXPTIME'] < min_frametime:
+            if self.hdu[i][0].header['EXPTIME'] < min_frametime:
                 self.hdu.pop(i)
                 self.files.pop(i)
         
@@ -420,30 +434,6 @@ class IracAOR():
         self.cbunc = np.stack(self.cbunc)
         self.bimsk = np.stack(self.bimsk)
         self.brmsk = np.stack(self.brmsk)
-
-        # self.cbcd = np.stack([im.data*1 for im in self.hdu])
-        # 
-        # self.cbunc = np.stack([pyfits.open(file.replace('bcd.', 'bunc.'))[0].data for file in self.files])
-        # if self.instrument == 'irac':
-        #     self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bimsk.'))[0].data for file in self.files])
-        # else:
-        #     self.bimsk = np.stack([pyfits.open(file.replace('_cbcd','_bcd').replace('bcd.', 'bbmsk.').replace('_ebb','_eb'))[0].data for file in self.files])
-        #     
-        # if use_brmsk:
-        #     try:
-        #         self.brmsk = np.zeros(self.bimsk.shape, dtype=np.int16)
-        #         for i, file in enumerate(self.files):
-        #             rmsk_file =  file.replace('bcd.', 'brmsk.')
-        #             if os.path.exists(rmsk_file):
-        #                 self.brmsk[i,:,:] = pyfits.open(rmsk_file)[0].data     
-        #     except:
-        #         self.brmsk = None
-        # else:
-        #     self.brmsk = None
-        #     
-        # self.wcs = [pywcs.WCS(im.header) for im in self.hdu]
-        # for w in self.wcs:
-        #     w.pscale = utils.get_wcs_pscale(w)
         
         self.shifts = np.zeros((self.N, 2))
         self.rot = np.zeros(self.N)
@@ -727,7 +717,7 @@ class IracAOR():
         """
         Convert MJy/Sr to an AB zeropoint for a given pixel scale
         """
-        return np.sum([self.hdu[i].header['EXPTIME'] for i in range(self.nskip, self.N)])
+        return np.sum([self.hdu[i][0].header['EXPTIME'] for i in range(self.nskip, self.N)])
     
     def get_all_psfs(self, psf_coords=None, func=get_bcd_psf):
         
@@ -823,7 +813,7 @@ class IracAOR():
         cat[clip].write('{0}-{1}.cat.fits'.format(self.name, self.label), overwrite=True)
         
         ra, dec = w.wcs.crval
-        radec_ext, ref_name = prep.get_radec_catalog(ra=ra, dec=dec, radius=GAIA_SIZE, product='{0}-{1}'.format(self.name, self.label), verbose=True, reference_catalogs=reference, use_self_catalog=False, date=self.hdu[0].header['MJD_OBS'], date_format='mjd')
+        radec_ext, ref_name = prep.get_radec_catalog(ra=ra, dec=dec, radius=GAIA_SIZE, product='{0}-{1}'.format(self.name, self.label), verbose=True, reference_catalogs=reference, use_self_catalog=False, date=self.hdu[0][0].header['MJD_OBS'], date_format='mjd')
         if radec is None:
             radec = radec_ext
             if assume_close > 0:
@@ -856,18 +846,18 @@ class IracAOR():
         for i, h in enumerate(self.hdu):
             print(i, self.files[i])
             tmpfile = 'tmp_{0}_cbcd.fits'.format(self.label)
-            h.writeto(tmpfile, overwrite=True)
+            h[0].writeto(tmpfile, overwrite=True)
             updatehdr.updatewcs_with_shift(tmpfile, 
-                                '{0}-{1}_drz_sci.fits'.format(self.name, self.label),
+                        '{0}-{1}_drz_sci.fits'.format(self.name, self.label),
                                       xsh=out_shift[0], ysh=out_shift[1],
                                       rot=out_rot, scale=out_scale,
                                       wcsname=ref_name, force=True,
                                       reusename=True, verbose=False,
                                       sciext='PRIMARY')
             
-            self.hdu[i] = pyfits.open(tmpfile)[0]
+            self.hdu[i] = pyfits.open(tmpfile)
         
-        self.wcs = [pywcs.WCS(im.header) for im in self.hdu]
+        self.wcs = [pywcs.WCS(im[0].header) for im in self.hdu]
         for w in self.wcs:
             w.pscale = utils.get_wcs_pscale(w)
         
@@ -886,7 +876,7 @@ class IracAOR():
         tab['aor'] = [f.split('/')[0] for f in self.files]
         
         for k in ['EXPTIME', 'MJD_OBS', 'PROGID','DPID','OBJECT','OBSRVR']:
-            tab[k.lower()] = np.array([h.header[k] for h in self.hdu])
+            tab[k.lower()] = np.array([im[0].header[k] for im in self.hdu])
         
         tab.rename_column('dpid', 'bcd')
             
