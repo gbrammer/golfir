@@ -1145,7 +1145,7 @@ class ModelPSF(object):
         self.rmax = rmax
         
         if 'amplitude' in model.param_names:
-            model.fixed['amplitude'] = 1.
+            model.fixed['amplitude'] = True
             
         init_model_attr(model)
         self.model = model
@@ -1219,12 +1219,12 @@ class ModelPSF(object):
         from astropy.modeling.models import Moffat2D, Gaussian2D
         if type == 'Moffat2D':
             m = Moffat2D()
-            m.fixed['amplitude'] = 1.
+            m.fixed['amplitude'] = True
             init_model_attr(m)
             m.pscale['alpha'] = 0.1
         else:
             m = Gaussian2D()
-            m.fixed['amplitude'] = 1.
+            m.fixed['amplitude'] = True
             init_model_attr(m)
         
         return m
@@ -1311,6 +1311,287 @@ class MipsPSF(object):
         
         return psf, None, None
         
+class MixturePSF(object):
+    def __init__(self, N=3, rmax=10, rs=None, ee1=0., ee2=0., window=None):
+        """
+        Mixture of Gaussians PSF from `~tractor`.
+        """
+        from tractor.psf import GaussianMixtureEllipsePSF
+        from tractor.ellipses import EllipseESoft
+
+        self.N = N
+        if rs is None:
+            #rs = [np.log(2 * (r+1)) for r in range(N)]
+            rs = np.linspace(np.log(1), np.log(rmax), N)
+
+        self.mogs = [GaussianMixtureEllipsePSF(np.array([1]), np.array([[0., 0.]]), [EllipseESoft(r, ee1, ee2)]) for r in rs]
+        self.coeffs = np.ones(N)
+        self.indices = np.arange(1,6)
+        self.i0 = self.indices*1
+        self.p0 = self.getParams()*1
+        self.coeffs = np.ones(self.N)
+        self.orig_pixscale = np.nan
+
+        self.window = window
+
+        self.set_pixelgrid(size=32, instep=0.1, outstep=0.1, oversample=1)
+        self.x0 = np.array([0., 0.])
+        
+        # Parameter bounds for fitting
+        self.bounds_amp = (-1, 1)
+        self.bounds_x = (-3, 3)
+        self.bounds_y = (-3, 3)
+        self.bounds_logr = (-0.5, 3)
+        self.bounds_ee1 = (-1, 1)
+        self.bounds_ee2 = (-1, 1)
+        
+    @property
+    def bounds(self):
+        """
+        Parameter bounds
+        """
+        b = [self.bounds_amp,  # amplitude
+             self.bounds_x,    # meanx0
+             self.bounds_y,    # meany0,
+             self.bounds_logr, # logr0
+             self.bounds_ee1,  # ee1 ellip parameters
+             self.bounds_ee2]  # ee2
+
+        lo = [b[i][0] for i in self.indices]*self.N
+        hi = [b[i][1] for i in self.indices]*self.N
+        return (lo, hi)
+    
+    @staticmethod
+    def elipse_from_baphi(ba, phi):
+        """
+        Generate ellipse parameters e1, e2 from ba=b/a and phi PA in degrees
+        """
+        ab = 1. / ba
+        e = (ab - 1) / (ab + 1)
+        angle = np.radians(2. * (-phi))
+        e1 = e * np.cos(angle)
+        e2 = e * np.sin(angle)
+        return e1, e2
+        
+    def setParams(self, theta):
+        """
+        Set parameters for each element in `self.mogs`.
+        """
+        Ni = self.indices.size
+        thetas = np.reshape(theta, (-1, Ni))
+        for i in range(self.N):
+            p0 = np.array(self.mogs[i].getParams())*1
+            p0[self.indices] = thetas[i]
+            self.mogs[i].setParams(p0)
+
+    def getParams(self):
+        """
+        Return a combined list of all `self.mogs` parameteres.
+        """
+        return np.hstack([np.array(m.getParams())[self.indices] for m in self.mogs])
+
+    def get_matrix(self, pos, coeffs=None):
+        """
+        Evaluatee `self.mogs` at `pos` positions and return a matrix 
+        suitable for least squares
+        """
+        _mog = np.stack([mog.mog.evaluate(pos) for mog in self.mogs]).T        
+        _mog2 = (_mog/_mog.sum(axis=0))#.reshape((sh[0], sh[1], self.N))
+        if coeffs is not None:
+            return _mog2.dot(coeffs)            
+        else:
+            return _mog2
+
+    def set_pixelgrid(self, size=32, instep=0.168, outstep=0.2, oversample=2):
+        """
+        Set the `self.pos` pixel grid for evaluating the output PSFs.  
+        
+        instep : pixel size where PSF was generated
+        outstep : pixel size of final mosaic in the same input filter
+        oversample : factor by which you want to oversample the output grid.  
+        """
+        ostep = outstep/instep/oversample
+        xarr = np.arange(-size, size, 1) * ostep
+        xp, yp = np.meshgrid(xarr, xarr)           
+        self.shape = xp.shape
+        self.oversample = oversample
+        self.pos = np.array([xp.flatten(), yp.flatten()]).T 
+
+    def evaluate_psf(self, transform=None, normalize=True, **kwargs):
+        """
+        Function to evaluate the PSF on the `self.pos` grid.  
+                
+        First two elements of `transform` used as a shift.
+        
+        """
+        x0 = self.x0*1
+        if transform is not None:
+            x0 += transform[:2]/self.oversample
+
+        psf = self.get_matrix(self.pos-x0, coeffs=self.coeffs)
+        psf = psf.reshape(self.shape)
+
+        if self.window is not None:
+            psf *= self.window
+
+        if normalize:
+            psf /= psf.sum()
+
+        return psf, 1., 1.
+
+    @property 
+    def centroid(self):
+        """
+        PSF centroid
+        """
+        psf, _, _ = self.evaluate_psf(transform=None)
+        center = (self.pos.T*psf.flatten()).sum(axis=1)
+        return center
+
+    def recenter(self):
+        """
+        Shift gaussian centers to enforce centroid = (0,0)
+        """
+        self.x0 -= self.centroid
+    
+    def initialize_for_hscy(self, r=2.0, phi=0., ba=0.05, comp=-1):
+        """
+        Set last component to elongated ellipse for use with HSC-y band
+        """
+        e1, e2 = self.ellipse_from_baphi(ba, phi)
+        pars = [0.5, 0., 0., r, e1, e2]
+        self.mogs[comp].setAllParams(pars) 
+        
+    def from_cutout(self, input, pixscale=None, show=True, fit_ellipse=True):
+        """
+        Generate a MixturePSF from a cutout.
+        
+        input : string FITS filename or array
+        show : make a figure showing the fit
+        
+        """
+        from scipy.optimize import least_squares, minimize 
+        import matplotlib.pyplot as plt
+        import astropy.wcs as pywcs
+        
+        if isinstance(input, str):
+            psf = pyfits.open(input)
+            cutout = psf[0].data
+
+            try:
+                wcs = pywcs.WCS(psf[0].header)
+                self.orig_pixscale = utils.get_wcs_pscale(wcs)
+            except:
+                if pixscale is not None:
+                    self.orig_pixscale = pixscale
+                    
+        else:
+            cutout = input*1.
+            if pixscale is not None:
+                self.orig_pixscale = pixscale
+                
+        xarr = np.arange(0, cutout.shape[0], 1.) 
+        xarr -= cutout.shape[0]/2.
+        xpo, ypo = np.meshgrid(xarr, xarr)           
+        pos = np.array([xpo.flatten(), ypo.flatten()]).T 
+
+        # Centroid
+        cx = (xpo*cutout).sum()/cutout.sum()
+        cy = (ypo*cutout).sum()/cutout.sum()
+        for mog in self.mogs:
+            mog.meanx0 = cx#+1
+            mog.meany0 = cy#+1
+
+        # Centers
+        self.indices = np.arange(1,3)
+        args = (self, cutout, pos, np.linalg.lstsq, 'lm')
+        margs = (self, cutout, pos, np.linalg.lstsq, 'model')
+        xi = self.getParams()
+        _x0 = least_squares(self._objmog, xi, method='trf', bounds=self.bounds, args=args)
+        x0 = _x0.x
+        a0, m0 = self._objmog(x0, *margs)
+        self.coeffs = a0[1:]
+
+        # Fit all params
+        self.indices = np.arange(1,4+fit_ellipse*2)
+        args = (self, cutout, pos, np.linalg.lstsq, 'lm')
+        margs = (self, cutout, pos, np.linalg.lstsq, 'model')
+        xi = self.getParams()
+        _x3 = least_squares(self._objmog, xi, method='trf', bounds=self.bounds, args=args)
+        x3 = _x3.x
+        a3, m3 = self._objmog(x3, *margs)
+        self.coeffs = a3[1:]
+
+        ### Show
+        if show:
+            bg = 0.
+
+            fig = plt.figure(figsize=(9,3))
+            ax = fig.add_subplot(131)
+            imsh = ax.imshow(np.log10(cutout-bg))
+            vmin, vmax= imsh.get_clim()
+
+            mog_model = m3
+
+            ax = fig.add_subplot(132)
+            ax.imshow(np.log10(mog_model), vmin=vmin, vmax=vmax)
+
+            ax = fig.add_subplot(133)
+            ax.imshow(np.log10(cutout - bg - mog_model), vmin=vmin, vmax=vmax)
+
+            for ax in fig.axes:
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+
+            fig.tight_layout(pad=0.1)
+
+    @staticmethod        
+    def _objmog(theta, mixpsf, cutout, pos, lsq, ret):
+        mixpsf.setParams(theta)
+        cflat = cutout.flatten()
+        _X = np.hstack([cflat[:,None]*0.+1, mixpsf.get_matrix(pos)])
+
+        _res = lsq(_X, cutout.flatten())
+        model = _X.dot(_res[0])
+
+        if ret == 'model':
+            return _res[0], model.reshape(cutout.shape) - _res[0][0]
+
+        chi2 = (model - cflat)
+
+        if ret.endswith('v'):
+            print(theta, (chi2**2).sum())
+
+        if ret.startswith('chi2'):
+            return (chi2**2).sum()
+        elif ret.startswith('lm'):
+            return chi2
+        else:
+            return -0.5*(chi2**2).sum()
+        
+class ArrayPSF(object):
+    def __init__(self, psf_data=None, resample=1):
+        
+        self.psf_data = psf_data/psf_data.sum()
+        if resample > 0:
+            sh = self.psf_data.shape
+            new_psf = np.zeros((sh[0]*resample, sh[1]*resample), dtype=self.psf_data.dtype)
+            for i in range(resample):
+                for j in range(resample):
+                    new_psf[i::resample, j::resample] += self.psf_data
+            
+            self.psf_data = new_psf/resample**2
+            
+    def evaluate_psf(self, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
+        
+        psf = self.psf_data
+        if transform is not None:
+            psf = warp_image(transform, psf, warp_args=warp_args)
+            
+        return psf/psf.sum(), 1., 1.
+    
+    def get_exposure_time(self, ra, dec, get_files=False, verbose=False):
+        return 1., 1.
         
 class IracPSF(object):
     """
