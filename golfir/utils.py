@@ -1044,6 +1044,99 @@ def _obj_shift(transform, data, model, sivar, ret):
     chi2s = chi2[mask].sum()
     print(tf, chi2s)
     return chi2s
+
+RESCALE_KWARGS = {'order':1,'mode':'constant', 'cval':0., 
+                  'preserve_range':False, 'anti_aliasing':True}
+
+DRIZZLE_KWARGS = {'pixfrac':0.01, 'kernel':'point', 'verbose':False}
+
+def resample_array(img, wht=None, pixratio=2, slice_if_int=True, int_tol=1.e-3, method='drizzle', drizzle_kwargs=DRIZZLE_KWARGS, rescale_kwargs=RESCALE_KWARGS, scale_by_area=False, verbose=False, blot_stepsize=-1):
+    """
+    Resample an image to a new grid.  If pixratio is an integer, just return a 
+    slice of the input `img`.  Otherwise resample with `~drizzlepac` or `~resample`.
+    """
+    from grizli.utils import (make_wcsheader, drizzle_array_groups, 
+                              blot_nearest_exact)
+
+    from skimage.transform import rescale, resize, downscale_local_mean
+    
+    is_int = np.isclose(pixratio, np.round(pixratio), atol=int_tol)    
+    if is_int & (pixratio > 1):
+        # Integer scaling
+        step = int(np.round(pixratio))
+        if slice_if_int:
+            # Simple slice
+            res = img[step//2::step, step//2::step]*1
+            res_wht = np.ones_like(res)
+            method_used = 'slice'
+        else:
+            # skimage downscale with averaging
+            res = downscale_local_mean(img, (step, step), cval=0, clip=True)
+            res_wht = np.ones_like(res)
+            method_used = 'downscale'
+
+    else:
+        if method.lower() == 'drizzle':
+            # Drizzle
+            _, win = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                    pixscale=1., get_hdu=False, theta=0.)
+            
+            _, wout = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                     pixscale=pixratio, get_hdu=False, 
+                                     theta=0.)
+                        
+            if wht is None:
+                wht = np.ones_like(img)
+            
+            _drz = drizzle_array_groups([img], [wht], [win], outputwcs=wout,
+                                        **drizzle_kwargs)
+            res = _drz[0]
+            res_wht = _drz[1]
+            method_used = 'drizzle'
+        
+        elif method.lower() == 'blot':
+            # Blot exact values
+            _, win = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                    pixscale=1., get_hdu=False, theta=0.)
+            
+            _, wout = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                     pixscale=pixratio, get_hdu=False, 
+                                     theta=0.)
+            
+            # Ones for behaviour around zeros
+            res = blot_nearest_exact(img+1, win, wout, verbose=False, 
+                                     stepsize=blot_stepsize, 
+                                     scale_by_pixel_area=False, 
+                                     wcs_mask=False, fill_value=0) - 1
+                                     
+            res_wht = np.ones_like(res)
+            method_used = 'blot'
+            
+        elif method.lower() == 'rescale':
+            res = rescale(img, 1./pixratio, **rescale_kwargs)
+            res_wht = np.ones_like(res)
+            method_used = 'rescale'
+            
+        else:
+            raise ValueError("method must be 'drizzle', 'blot' or 'rescale'.")
+    
+    if scale_by_area:
+        scale = 1./pixratio**2
+    else:
+        scale = 1
+    
+    if verbose:
+        msg = 'resample_array x {4:.1f}: {0} > {1}, method={2}, scale={3:.2f}'
+        print(msg.format(img.shape, res.shape, method_used, scale, pixratio))
+            
+    if not np.isclose(scale, 1, 1.e-4):
+        res = res*scale
+        res_wht = res_wht/scale**2
+        
+    #print(res_wht, res_wht.dtype, scale, res_wht.shape)
+    #res_wht /= scale**2
+    
+    return res, res_wht
     
 def fit_point_source(t0, poly_order=5):
     Npan = 20
@@ -1360,132 +1453,6 @@ def fsps_observed_frame(sp, tage=0.2, z=5, cosmology=None, stellar_mass=1.e11):
     plt.ylim(30, 22)
     plt.xlim(0.1, 18)
 
-def run_galfit(id=7739):
-    
-    #print(i, id)
-    tf = None
-    psf_offset = 1.e-6
-    wpower = 0.05
-    use_psf=False
-    psf_offset, wpower = 0, -1
-    from grizli.galfit import galfit
-    
-    ix = phot['number'] == id
-          
-    _ = irac_psf_obj.evaluate_psf(ra=phot['ra'][ix], dec=phot['dec'][ix], min_count=10, clip_negative=False, transform=tf)
-
-    irac_psf, psf_exptime, psf_count = _                              
-    irac_psf += psf_offset
-    irac_psf *= (irac_psf > 0)
-    if wpower > 0:
-        coswindow = CosineBellWindow(alpha=1)
-        irac_psf *= coswindow(irac_psf.shape)**wpower
-    
-    irac_psf /= irac_psf.sum()
-    
-    segmap = ((seg_sl == id) | (seg_sl == 0))[pf//2::pf,pf//2::pf]
-    #segmap = ((seg_sl == id))[2::5,2::5]
-    segmap *= msk2d
-    
-    _c = _x[0]*1.
-    _c[Nbg + np.arange(len(ids))[ids == id]] = 0
-    
-    _Af = np.vstack([_Abg, _A])  
-    h_model = _Af.T.dot(_c).reshape(h_sm.shape)
-    ydata = irac_im.data[isly, islx] - h_model
-    ivar = (irac_sivar[isly, islx])**2
-        
-    if use_psf:
-        components = [galfit.GalfitPSF(), galfit.GalfitSky()]
-    else:
-        components = [galfit.GalfitSersic(), galfit.GalfitSky()]
-        #components = [galfit.GalfitSersic(disk=True), galfit.GalfitSersic(), galfit.GalfitSky()]
-        #components = [galfit.GalfitExpdisk(), galfit.GalfitSky()]
-    
-    #components = components[:1]
-    
-    # Don't include sky in model
-    if len(components) > 1:
-        components[-1].output = 1
-
-    wsl = irac_wcs.slice((isly, islx))  
-    xy = wsl.all_world2pix(np.array([phot['ra'][ix], phot['dec'][ix]]).T, 1).flatten()
-    for i in range(len(components)-1):
-        components[i].pdict['pos'] = list(xy)
-
-    components[0].pdict['mag'] = phot['mag_auto'][ix][0]+1.1
-    
-    if False:
-        fit_ids = [7126,7127,7129,7130,7641,7580,7579,7580,7578,7327,6530,6632,7821]
-        components = [galfit.GalfitSky()]
-        segmap = (seg_sl == 0)[2::5,2::5]
-
-        _c = _x[0]*1.
-    
-        _Af = np.vstack([_Abg, _A])  
-
-        for id_i in fit_ids:
-            ix = phot['number'] == id_i
-            _c[Nbg + np.arange(len(ids))[ids == id_i]] = 0
-            segmap |= ((seg_sl == id_i))[2::5,2::5]
-            components += [galfit.GalfitSersic()]
-            xy = wsl.all_world2pix(np.array([phot['ra'][ix], phot['dec'][ix]]).T, 1).flatten()
-            components[-1].pdict['pos'] = list(xy)
-            components[-1].pdict['mag'] = phot['mag_auto'][ix][0]+1.1
-    
-        h_model = _Af.T.dot(_c).reshape(h_sm.shape)
-        ydata = irac_im.data[isly, islx] - h_model
-    
-    #components[0].pfree['mag'] = 0
-    
-    #components[0].pdict['R_e'] = 0.1
-
-    ivar = 1/(1/ivar+(0.02*ydata)**2)
-
-    if use_psf:
-        gf = galfit.Galfitter.fit_arrays(ydata, ivar, segmap*1, irac_psf, psf_sample=5, id=1, components=components, recenter=False, exptime=0)
-    else:
-        gf = galfit.Galfitter.fit_arrays(ydata, ivar, segmap*1, irac_psf[pf//2::pf,pf//2::pf], psf_sample=1, id=1, components=components, recenter=False, exptime=0)
-    
-    chi2 = float(gf['ascii'][3].split()[3][:-1])
-    
-    if chi2 < 50:
-
-        _A[ids == id,:] = gf['model'].data.flatten()/gf['model'].data.sum()
-        
-        if recompute_coeffs:
-            _Af = np.vstack([_Abg, _A])  
-
-            # Bright stars
-            if bright is not None:
-                h_bright = _A[bright,:].T.dot(Anorm[bright])
-            else:
-                h_bright = 0
-
-            msk = sivar > 0
-            msk &= h_bright*sivar < bright_sn
-            msk2d = msk.reshape(h_sm.shape)
-
-            _Ax = (_Af[:,msk]*sivar[msk]).T
-            _yx = (y*sivar)[msk]
-
-            #bad = ~np.isfinite(_Ax)
-            print('Least squares')
-
-            _x = np.linalg.lstsq(_Ax, _yx, rcond=-1)
-            h_model = _Af.T.dot(_x[0]).reshape(h_sm.shape)
-        else:
-            h_model += gf['model'].data
-            
-        #Nbg = _Abg.shape[0]
-        h_bg = _Af[:Nbg].T.dot(_x[0][:Nbg]).reshape(h_sm.shape)
-
-        ds9.frame(13)
-        ds9.view(h_model*msk2d, header=utils.get_wcs_slice_header(irac_wcs, islx, isly))
-
-        ds9.frame(14)
-        ds9.view(msk2d*(irac_im.data[isly, islx]-h_model), header=utils.get_wcs_slice_header(irac_wcs, islx, isly))
-
 def match_slice_to_shape(slparent, nparent):
     """
     Refine a slice for a parent array that might not contain a full child
@@ -1678,7 +1645,8 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     drz_psf = (_drz[0]*coswindow) / (_drz[0]*coswindow).sum()     
               
     pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_psf.fits', data=drz_psf, overwrite=True)
-    
+
+
 def recenter_psfs():
     
     import astropy.io.fits as pyfits

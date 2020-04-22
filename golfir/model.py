@@ -23,6 +23,8 @@ from skimage.morphology import binary_dilation
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
+from astropy.visualization import (ImageNormalize, LogStretch,
+                                   SinhStretch, LinearStretch)
 
 from photutils import create_matching_kernel
 from photutils import (HanningWindow, TukeyWindow, CosineBellWindow,
@@ -30,10 +32,11 @@ from photutils import (HanningWindow, TukeyWindow, CosineBellWindow,
 
 import drizzlepac
 from drizzlepac.astrodrizzle import ablot
+from tqdm import tqdm
 
 import grizli.utils
 
-from tqdm import tqdm
+from . import utils
 
 # from golfir.utils import get_wcslist, _obj_shift
 # from golfir import irac
@@ -74,11 +77,23 @@ class ImageModeler(object):
 
             w = pyfits.open(f'{root}_waterseg.fits')
             self.waterseg = w[0].data*1
+            
+            if self.waterseg.shape[0]*2 == self.hst_im[0].data.shape[0]:
+                print('Making 2x waterseg image')
+                double_seg = np.zeros(self.hst_im[0].data.shape, 
+                                      dtype=self.waterseg.dtype)
+                for i in [0,1]:
+                    for j in [0,1]:
+                        double_seg[i::2, j::2] += self.waterseg*1
+                        
+                self.waterseg = double_seg
+                
         else:
             self.watershed_segmentation()
         
         # Read Low-res (IRAC) data
-        self.read_lores_data(filter=lores_filter, use_avg_psf=use_avg_psf)
+        self.read_lores_data(filter=lores_filter, use_avg_psf=use_avg_psf, 
+                             **kwargs)
         
         # Initialize PSFs
         self.init_psfs(**kwargs)
@@ -99,6 +114,18 @@ class ImageModeler(object):
                                       data=self.full_mask)
             self.comp_hdu = pyfits.HDUList([prime])
             self.comp_hdu[0].header['EXTNAME'] = 'MASK'
+        
+        # Model file
+        model_file = f'{self.root}-{self.lores_filter}_model.fits'
+        if os.path.exists(model_file):
+            grizli.utils.log_comment(self.LOGFILE, 
+                   f'Read model file file "{model_file}".', 
+                   verbose=self.verbose, show_date=True)
+
+            im_model = pyfits.open(model_file)[0]
+            self.full_model = im_model.data.byteswap().newbyteorder()
+        else:
+            self.full_model = self.lores_im.data.byteswap().newbyteorder()*0
         
         # testing
         if False:
@@ -177,16 +204,18 @@ class ImageModeler(object):
         """
         Read HST data
         """
-        ref_files = glob.glob('{0}-f1*_drz_sci.fits'.format(self.root))
-        ref_files.sort()
+        
+        ref_files = glob.glob(f'{self.root}-{prefer_filter}*_dr?_sci.fits')
+        
         if len(ref_files) == 0:
-            ref_files = glob.glob('{0}-ir*_dr*_sci.fits'.format(self.root))
+            ref_files = glob.glob('{0}-f1*_drz_sci.fits'.format(self.root))
+            if len(ref_files) == 0:
+                ref_files = glob.glob(f'{self.root}-ir*_dr*_sci.fits')
+                
             ref_files.sort()
-            
-        if f'{self.root}-{prefer_filter}_drz_sci.fits' in ref_files:
-            ref_file = f'{self.root}-{prefer_filter}_drz_sci.fits'
-        else:
             ref_file = ref_files[-1]
+        else:
+            ref_file = ref_files[0]
         
         grizli.utils.log_comment(self.LOGFILE, 
                f'Use HST reference image "{ref_file}".', verbose=self.verbose, 
@@ -206,8 +235,26 @@ class ImageModeler(object):
                                   
         hst_psf /= hst_psf.sum()
 
-        hst_seg = pyfits.open(self.root+'-ir_seg.fits')[0]
-        hst_ujy = hst_im[0].data*hst_im[0].header['PHOTFNU'] * 1.e6
+        hst_seg = pyfits.open(self.root+'-ir_seg.fits')[0].data
+        # Need doubled seg for ACS?
+        if hst_seg.shape[0]*2 == hst_im[0].data.shape[0]:
+            print('Making 2x segmentation image')
+            double_seg = np.zeros(hst_im[0].data.shape, dtype=hst_seg.dtype)
+            for i in [0,1]:
+                for j in [0,1]:
+                    double_seg[i::2, j::2] += hst_seg
+            
+            hst_seg = double_seg
+        
+        if 'PHOTFNU' in hst_im[0].header:
+            phot_fnu = hst_im[0].header['PHOTFNU']*1.e6
+        elif 'PHOTFLAM' in hst_im[0].header:
+            phot_fnu = hst_im[0].header['PHOTFLAM']/2.999e18
+            phot_fnu *= hst_im[0].header['PHOTPLAM']**2/1.e-23*1.e6
+        else:
+            phot_fnu = 1.
+            
+        hst_ujy = hst_im[0].data*phot_fnu
         
         bad = ~np.isfinite(hst_ujy)
         hst_wht[0].data[bad] = 0
@@ -261,7 +308,7 @@ class ImageModeler(object):
         
         # globaal median
         med = np.median(self.hst_im[0].data[(self.hst_wht[0].data > 0) 
-                         & (self.hst_seg.data == 0)])
+                         & (self.hst_seg == 0)])
         
         # Convolved with Gaussian kernel                 
         kern = Gaussian2DKernel(smooth_size).array
@@ -273,15 +320,18 @@ class ImageModeler(object):
 
         xi = np.cast[int](np.round(self.phot['xpeak']))
         yi = np.cast[int](np.round(self.phot['ypeak']))
-        markers = np.zeros(self.hst_im[0].data.shape, dtype=int)
-        markers[yi, xi] = self.phot['number']
+        sh = self.hst_im[0].data.shape
+        markers = np.zeros(sh, dtype=int)
+        clip = (xi > 0) & (xi < sh[1]) & (yi > 0) & (yi < sh[0])
+        
+        markers[yi[clip], xi[clip]] = self.phot['number'][clip]
         
         waterseg = watershed(-hst_conv, markers, mask=(hst_conv/np.sqrt(hst_cvar) > 1))
-        waterseg[waterseg == 0] = self.hst_seg.data[waterseg == 0]
+        waterseg[waterseg == 0] = self.hst_seg[waterseg == 0]
         
         self.waterseg = waterseg
         
-    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None):
+    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, **kwargs):
         """
         Read low-res (e.g., IRAC)
         """
@@ -336,7 +386,11 @@ class ImageModeler(object):
             irac_im = pyfits.open('{0}-{1}_drz_sci.fits'.format(self.root, filter))[0]
             irac_wht = pyfits.open('{0}-{1}_drz_wht.fits'.format(self.root, filter))[0].data
             irac_psf_obj = irac.MipsPSF()
-            pf = 10 # assume 1" pixels
+            #pf = 10 # assume 1" pixels
+            irac_wcs = pywcs.WCS(irac_im.header)
+            irac_wcs.pscale = grizli.utils.get_wcs_pscale(irac_wcs)
+            #pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+            pf = irac_wcs.pscale/self.hst_wcs.pscale
 
             self.column_root = 'mips_24'
 
@@ -358,7 +412,8 @@ class ImageModeler(object):
             try:
                 irac_wcs = pywcs.WCS(irac_im.header)
                 irac_wcs.pscale = grizli.utils.get_wcs_pscale(irac_wcs)
-                pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+                #pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+                pf = irac_wcs.pscale/self.hst_wcs.pscale
             except:
                 pf = 5
 
@@ -379,8 +434,9 @@ class ImageModeler(object):
             self.column_root = filter
             
             irac_wcs = pywcs.WCS(irac_im.header)
-            irac_wcs.pscale = utils.get_wcs_pscale(irac_wcs)
-            pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+            irac_wcs.pscale = grizli.utils.get_wcs_pscale(irac_wcs)
+            #pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+            pf = irac_wcs.pscale/self.hst_wcs.pscale
             
         if f'{self.column_root}_flux' not in self.phot.colnames:
             self.phot[f'{self.column_root}_flux'] = -99.
@@ -404,7 +460,13 @@ class ImageModeler(object):
         self.lores_filter = filter
         
         # HST weight in LoRes frame
-        self.hst_wht_i = self.hst_wht[0].data[::self.pf, ::self.pf]
+        #self.hst_wht_i = self.hst_wht[0].data[::self.pf, ::self.pf]
+        self.hst_wht_i = utils.resample_array(self.hst_wht[0].data, 
+                               wht=self.hst_wht[0].data, pixratio=self.pf, 
+                               slice_if_int=True, int_tol=1.e-3, 
+                               method='rescale', scale_by_area=False, 
+                               verbose=False)[0]
+        
         corner = self.hst_wcs.all_pix2world(np.array([[-0.5, -0.5]]), 0)
         ll = np.cast[int](self.lores_wcs.all_world2pix(corner, 0)).flatten()
         self.lores_mask = np.zeros(self.lores_shape)
@@ -449,9 +511,25 @@ class ImageModeler(object):
             return np.sqrt(self.lores_wht)
             
     def patch_initialize(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, bkg_kwargs={}):
-                
+        """
+        Initialize patch parameters
+        """
         self.patch_arcmin = patch_arcmin
-        self.patch_npix = int(patch_arcmin*60*10/self.pf)
+        
+        # Take slice to calculate patch size in lores frame
+        #n_hst = int(np.round(2*self.patch_npix*self.pf))        
+        n_hst = int(np.round(patch_arcmin*60*2/self.hst_wcs.pscale))
+
+        _dummy = utils.resample_array(self.waterseg[:n_hst, :n_hst], 
+                               wht=None, pixratio=self.pf, 
+                               slice_if_int=True, int_tol=1.e-3, 
+                               method='rescale', scale_by_area=False, 
+                               verbose=False)[0]
+        
+        self.patch_npix = _dummy.shape[0]
+        self.patch_shape = _dummy.shape
+                              
+        #self.patch_npix = int(np.round(patch_arcmin*60/self.lores_wcs.pscale)
         self.patch_id = patch_id
         
         # Centered on HST
@@ -470,22 +548,29 @@ class ImageModeler(object):
                 
         xy_lores = np.cast[int](np.round(self.lores_wcs.all_world2pix(np.array([rd_patch]), 0))).flatten()
 
-        ll_lores = xy_lores - self.patch_npix
+        ll_lores = np.cast[int](np.round(xy_lores - self.patch_npix/2.))
         corner = self.lores_wcs.all_pix2world(np.array([ll_lores])-0.5, 0)
         ll_hst_raw = self.hst_wcs.all_world2pix(corner, 0)
         ll_hst = np.cast[int](np.ceil(ll_hst_raw)).flatten()
-
-        slx = slice(ll_hst[0], ll_hst[0]+2*self.patch_npix*self.pf)
-        sly = slice(ll_hst[1], ll_hst[1]+2*self.patch_npix*self.pf)
+        
+        slx = slice(ll_hst[0], ll_hst[0]+n_hst)
+        sly = slice(ll_hst[1], ll_hst[1]+n_hst)
         
         self.hst_slx, self.hst_sly = slx, sly
         self.patch_seg = self.waterseg[sly, slx]*1
         self.patch_ll = ll_lores
         
-        self.islx = slice(ll_lores[0], ll_lores[0]+2*self.patch_npix)
-        self.isly = slice(ll_lores[1], ll_lores[1]+2*self.patch_npix)
-        self.patch_shape = self.patch_seg[::self.pf,::self.pf].shape
-    
+        self.patch_seg_lores = utils.resample_array(self.patch_seg, 
+                               wht=None, pixratio=self.pf, 
+                               slice_if_int=True, int_tol=1.e-3, 
+                               method='blot', scale_by_area=False, 
+                               verbose=False)[0]
+        
+        self.islx = slice(ll_lores[0], ll_lores[0]+self.patch_npix)
+        self.isly = slice(ll_lores[1], ll_lores[1]+self.patch_npix)
+        #self.patch_shape = self.patch_seg[::self.pf,::self.pf].shape
+        #self.patch_shape = (self.patch_npix, self.patch_npix)
+        
         self.patch_sci = self.lores_im.data[self.isly, self.islx].flatten()
         self.patch_sivar = (self.lores_sivar[self.isly, self.islx]).flatten()
     
@@ -509,7 +594,39 @@ class ImageModeler(object):
                                             shape=self.patch_shape).flatten()
         else:
             self.patch_reg_mask = np.isfinite(self.patch_sci)
-            
+        
+        # Patch border mask: one pixel around the edge convolved with the 
+        # PSF kernel.
+        nx = self.patch_seg.shape[0]/2.
+        border = np.ones(self.patch_seg.shape)
+        yp, xp = np.indices((border.shape))
+        border[1:-1,1:-1] = 0
+        #border = (R > Npan*np)*1
+        
+        _ = self.lores_psf_obj.evaluate_psf(ra=rd_patch[0], dec=rd_patch[1],
+                                      min_count=0, clip_negative=True, 
+                                      transform=None)
+
+        lores_psf, psf_exptime, psf_count = _                              
+        if (self.psf_window is -1) | (self.psf_only):
+            psf_kernel = lores_psf
+        else:
+            #print('WINDOW {0}'.format(self.psf_window))
+            psf_kernel = create_matching_kernel(self.hst_psf_full,
+                                   lores_psf, window=self.psf_window)
+        
+        b_conv = convolve2d(border, psf_kernel, mode='constant', fft=1,
+                            cval=1)
+                                     
+        #self.patch_border = b_conv[::self.pf, ::self.pf].flatten()
+        self.patch_border = utils.resample_array(b_conv, 
+                               wht=None, pixratio=self.pf, 
+                               slice_if_int=True, int_tol=1.e-3, 
+                               method='rescale', scale_by_area=False, 
+                               verbose=False)[0]
+                               
+        self.patch_border /= self.patch_border.max()
+           
         # Try to use stored patch transform
         model_image = '{0}-{1}_model.fits'.format(self.root, self.lores_filter)
         if os.path.exists(model_image):
@@ -554,12 +671,12 @@ class ImageModeler(object):
         
         # Background model
         if poly_order < 0:
-            auto_order = int(np.round(2*self.patch_npix/order_npix))
+            auto_order = int(np.round(self.patch_npix/order_npix))
             poly_order = np.clip(auto_order, *order_clip)
         
         self.bkg_poly_order = poly_order
         
-        x = np.linspace(-1, 1, 2*self.patch_npix)
+        x = np.linspace(-1, 1, self.patch_npix)
         _Abg = []
         c = np.zeros((poly_order, poly_order))
         for i in range(poly_order):
@@ -571,7 +688,7 @@ class ImageModeler(object):
         self._Abg = np.array(_Abg)
         self.Nbg = self._Abg.shape[0]
         
-    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, **kwargs):
+    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', **kwargs):
         """
         Compute hst-to-IRAC components for objects in the patch
         """
@@ -589,7 +706,9 @@ class ImageModeler(object):
                 msg = 'mag_auto < {0:.1f}'.format(mag_limit, mtest.sum())
 
             ids = ids[mtest]
-        
+        else:
+            msg = 'from segmentation'
+            
         N = len(ids)
         self.patch_nobj = N
         self.patch_ids = ids
@@ -647,7 +766,14 @@ class ImageModeler(object):
             _Ai = convolve2d(hst_slice*(self.patch_seg == id), psf_kernel,
                               mode='constant', fft=1, cval=0.0)
                               
-            _A.append(_Ai[self.pf//2::self.pf, self.pf//2::self.pf].flatten()*self.pf**2)                 
+            # Reshaped
+            _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
+                                   slice_if_int=True, int_tol=1.e-3, 
+                                   method=resample_method, 
+                                   scale_by_area=False, 
+                                   verbose=False)[0]
+                                   
+            _A.append(_Alo.flatten()*self.pf**2)                 
 
         self._A = np.array(_A)
         
@@ -662,29 +788,10 @@ class ImageModeler(object):
         self.patch_nobj = keep.sum()
         self.model_bright = 0.
         
-        # Patch border
-        nx = self.patch_npix*self.pf
-        border = np.ones((2*nx, 2*nx))
-        yp, xp = np.indices((border.shape))
-        R = np.sqrt((xp+self.pf-nx)**2+(yp+self.pf-nx)**2)
-        border[1:-1,1:-1] = 0
-        #border = (R > Npan*np)*1
-        b_conv = convolve2d(border, psf_kernel, mode='constant', fft=1,
-                            cval=1)
-                                     
-        self.patch_border = b_conv[::self.pf, ::self.pf].flatten()
-        self.patch_border /= self.patch_border.max()
-        self.patch_border_mask = self.patch_border < border_limit
+        self.patch_border_mask = (self.patch_border < border_limit).flatten()
         self.patch_border_limit = border_limit
         
-        # IDs that touch the border
-        self.patch_seg_sub = self.patch_seg[self.pf//2::self.pf, self.pf//2::self.pf].flatten()
-        
-        # self.patch_border_ids = np.unique(self.patch_seg_sub*(~self.patch_border_mask))[1:]
-        # self.patch_ids_in_border = grizli.utils.column_values_in_list(self.patch_ids, self.patch_border_ids)
-
         # IDs that fall out of the (bordered) patch
-        
         patch_xy = patch_xy[keep,:]
         patch_xyint = np.clip(np.cast[int](np.round(patch_xy)), 0, self.patch_shape[-1]-1)
         self.patch_ids_in_border = ~self.patch_border_mask.reshape(self.patch_shape)[patch_xyint[:,1], patch_xyint[:,0]]
@@ -710,8 +817,10 @@ class ImageModeler(object):
         
         ids = self.patch_ids
         
+        #self.patch_seg_lores = self.patch_seg[self.pf//2::self.pf, self.pf//2::self.pf].flatten()
+        
         for ie, id_i in enumerate(ids):
-            in_seg = (self.patch_seg_sub == id_i).reshape(self.patch_shape)
+            in_seg = (self.patch_seg_lores == id_i).reshape(self.patch_shape)
             if in_seg.sum() == 0:
                 continue
             
@@ -723,8 +832,14 @@ class ImageModeler(object):
                                   transform=None)
                                   
             psf_full_i, _exptime, _count = _    
-            # Resample
-            psf_i = psf_full_i[self.pf//2::self.pf, self.pf//2::self.pf]
+            # Resample PSF
+            #psf_i = psf_full_i[self.pf//2::self.pf, self.pf//2::self.pf]
+            psf_i = utils.resample_array(self.patch_seg, 
+                                   wht=None, pixratio=self.pf, 
+                                   slice_if_int=True, int_tol=1.e-3, 
+                                   method='rescale', scale_by_area=False, 
+                                   verbose=False)[0]
+                                   
             psf_i /= psf_i.sum()
             sh = psf_i.shape
             sx = sh[1]//2
@@ -953,15 +1068,19 @@ class ImageModeler(object):
                 plt.ion()
                 plt.close('all')
                 
-    def patch_align(self):
+    def patch_align(self, align_type=3, **kwargs):
         """
         Realign
+        
+        `align_type`: 1 = shift, 2 = shift+rot, 3 = shift+rot=scale
+        
         """
         from golfir.utils import get_wcslist, _obj_shift
         from golfir import irac
         
         t0 = np.array([0,0,0,1])*np.array([1,1,1,100.])
-
+        t0 = t0[:align_type+1]
+        
         args = (self.lores_im.data[self.isly, self.islx], self.patch_model, self.patch_sivar.reshape(self.patch_shape)*self.patch_mask, 0)
 
         _res = minimize(_obj_shift, t0, args=args, method='powell')
@@ -969,12 +1088,25 @@ class ImageModeler(object):
         args = (self.lores_im.data[self.isly, self.islx], self.patch_model, self.patch_sivar.reshape(self.patch_shape)*self.patch_mask, 1)
         tfx, warped = _obj_shift(_res.x, *args)
         tf = tfx*1
-
+        
+        if align_type == 1:
+            rot = 0.
+            scale = 1.
+        elif align_type == 2:
+            rot = tf[2]
+            scale = 1.
+        elif align_type == 3:
+            rot = tf[2]
+            scale = tf[3]
+            
         # Modify PSF positioning
-        dd = np.cast[int](np.round(tf[:2]*self.pf))
-        self.patch_transform[:2] += tf[:2]*self.pf
-        self.patch_transform[2] += tf[2]
-        self.patch_transform[3] *= tf[3]
+        shift_factor = self.pf
+        #shift_factor = 1
+        
+        dd = np.cast[int](np.round(tf[:2]*shift_factor))
+        self.patch_transform[:2] += tf[:2]*shift_factor
+        self.patch_transform[2] += rot
+        self.patch_transform[3] *= scale
 
         #self.patch_transform[3] *= tf[3]
         
@@ -1022,7 +1154,8 @@ class ImageModeler(object):
             else:
                 fit_ids.append(id)
 
-        patch_seg = self.patch_seg[self.pf//2::self.pf, self.pf//2::self.pf]
+        #patch_seg = self.patch_seg[self.pf//2::self.pf, self.pf//2::self.pf]
+        patch_seg = self.patch_seg_lores
         segmap = (patch_seg == 0)
 
         segmap &= (self.patch_sivar > 0).reshape(self.patch_shape)
@@ -1094,7 +1227,13 @@ class ImageModeler(object):
                 
                 # Resample
                 if not use_oversampled_psf:
-                    galfit_psf = galfit_psf_full[self.pf//2::self.pf, self.pf//2::self.pf]
+                    #galfit_psf = galfit_psf_full[self.pf//2::self.pf, self.pf//2::self.pf]
+                    galfit_psf = utils.resample_array(galfit_psf_full, 
+                                           wht=None, pixratio=self.pf, 
+                                           slice_if_int=True, int_tol=1.e-3, 
+                                           method='rescale',
+                                           scale_by_area=False, 
+                                           verbose=False)[0]
                 else:
                     galfit_psf = galfit_psf_full*1
                     
@@ -1256,7 +1395,7 @@ class ImageModeler(object):
         pk = '{0:03d}'.format(self.patch_id)
         h['RA_'+pk] = (self.patch_rd[0], 'Patch RA')
         h['DEC_'+pk] = (self.patch_rd[1], 'Patch DEC')
-        h['ARCM_'+pk] = (self.patch_npix, 'Patch size arcmin')
+        h['ARCM_'+pk] = (self.patch_arcmin, 'Patch size arcmin')
         h['NPIX_'+pk] = (self.patch_npix, 'Patch size pix')
         h['DX_'+pk] = (self.patch_transform[0], 'Patch x shift')
         h['DY_'+pk] = (self.patch_transform[1], 'Patch y shift')
@@ -1281,7 +1420,7 @@ class ImageModeler(object):
 
         # Clip very negative measurements
         bad = flux < min_clip*err
-        flux[bad] = -99.*2
+        #flux[bad] = -99.*2
         err[bad] = -99.*2
         
         phot = self.phot
@@ -1417,7 +1556,7 @@ class ImageModeler(object):
         self.comp_hdu.writeto(component_file, overwrite=True)
                 
 
-    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, **kwargs):
+    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, align_type=3, **kwargs):
         """
         Run the multi-step process on a single patch
         """
@@ -1438,7 +1577,7 @@ class ImageModeler(object):
                 
         # Alignment
         if run_alignment:
-            self.patch_align()
+            self.patch_align(align_type=align_type)
         
             if ds9:
                 self.patch_display(ds9=ds9)
@@ -1461,11 +1600,15 @@ class ImageModeler(object):
             # bright ids
             ix = self.patch_ids -1
             
-            # flux = self.patch_obj_coeffs*1
-            # covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
-            # err = np.sqrt(covar.diagonal())[self.Nbg:]
-            # 
-            fit_bright = self.patch_obj_coeffs > galfit_flux_limit
+             
+            if galfit_flux_limit > 0:
+                fit_bright = self.patch_obj_coeffs > galfit_flux_limit
+            else:
+                flux = self.patch_obj_coeffs*1
+                covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
+                err = np.sqrt(covar.diagonal())[self.Nbg:]
+                fit_bright = (flux/err > -galfit_flux_limit) & (err > 0)
+                
             #fit_bright &= (~self.patch_ids_in_border)
             fit_bright &= (~self.patch_is_bright)
             
@@ -1544,10 +1687,12 @@ class ImageModeler(object):
         Generate patches to tile the field
         """
         
-        size =  patch_arcmin*60/0.5
+        pixel_scale = self.lores_wcs.pscale
+        
+        size =  patch_arcmin*60/pixel_scale
         pad = 1.02*size
-        extra = 10./0.5 # extra padding, arcsec
-        step = (2*patch_arcmin-patch_overlap)*60/0.5
+        extra = 10./pixel_scale # extra padding, arcsec
+        step = (2*patch_arcmin-patch_overlap)*60/pixel_scale
         
         valid = np.zeros(len(self.phot['mag_auto']), dtype=bool)
         for filt in check_filters:
@@ -1572,7 +1717,7 @@ class ImageModeler(object):
         ymin = np.maximum(self.lores_xy[valid,1].min()+size-extra-pad, 10)
         ymax = np.minimum(self.lores_xy[valid,1].max()+extra+pad, 
                           self.lores_shape[0]-10)
-        
+                
         if patch_arcmin < 0:
             # Single patch
             xp = np.array([(xmax + xmin)/2.])
@@ -1581,21 +1726,27 @@ class ImageModeler(object):
             rp, dp = self.lores_wcs.all_pix2world(xp[:1].flatten(), yp[:1].flatten(), 0)
             
             cosd = np.cos(dp[0]/180*np.pi)
-            patch_arcmin = np.maximum((xmax-xmin)*0.5/60/2., 
-                                      (ymax-ymin)*0.5/60/2.)
+            patch_arcmin = np.maximum((xmax-xmin)*pixel_scale/60/2., 
+                                      (ymax-ymin)*pixel_scale/60/2.)
             
         else:    
-            xp, yp = np.meshgrid(np.arange(xmin, xmax+size, step), np.arange(ymin, ymax+size, step))
+            xp, yp = np.meshgrid(np.arange(xmin, xmax+size, step),
+                                 np.arange(ymin, ymax+size, step))
         
-            rp, dp = self.lores_wcs.all_pix2world(xp.flatten(), yp.flatten(), 0)
+            rp, dp = self.lores_wcs.all_pix2world(xp.flatten(), 
+                                                  yp.flatten(), 0)
         
         patch_ids = np.arange(len(rp))
         
         fp = open(f'{self.root}_patch.reg','w')
         fp.write('fk5\n')
         for i in range(len(rp)):
-            fp.write(f'box({rp[i]:.6f}, {dp[i]:.6f}, '
-                     f'{2*patch_arcmin}\', {2*patch_arcmin}\') # text=xxx{patch_ids[i]}yyy\n'.replace('xxx','{').replace('yyy','}'))
+            msg = (f'box({rp[i]:.6f}, {dp[i]:.6f}, '
+                   f'{2*patch_arcmin}\', {2*patch_arcmin}\') #'
+                   f'text=xxx{patch_ids[i]}yyy\n')
+                  
+            fp.write(msg.replace('xxx','{').replace('yyy','}'))
+        
         fp.close()
         
         tab = grizli.utils.GTable()
@@ -1606,7 +1757,221 @@ class ImageModeler(object):
         
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
+    
+    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, model_error_frac=0.1, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2), labeleargs=dict(fontsize=9, va='top')):
+        """
+        Forced aperture photometry. 
+        
+        Parameters
+        ==========
+        
+        id : object id in catalog
+        
+        rd : forced ra, dec position
+        
+        aper_radius : aperture radius in arcsec, array-like for CoG
+        
+        model_error_frac : Add `model*model_error_frac` in quadrature to 
+                           pixel variances.
+        
+        make_figure : Make a diagnostic figure
+            
+            fig_grow : size of cutout * `aper_radiius`
+            
+            dtick : ticks on fig axes, arcsec
+            
+            vm : scaling (min, max), 'Auto', or 'Default'
+            
+            stretch : `~astropy.visualization` stretch object
+            
+            add_label : Add a simple label showing cutout info
+            
+            cmap : colormap
+            
+            fig_apargs : kwargs of the circular aperture drawn on the figure
+            
+            labeleargs : kwargs of the label text
+        
+        Returns
+        =======
+        
+        (ap_flux, ap_err, ap_flag, model_flux, model_sum), fig
+             
+        """
+        
+        import sep
+        
+        if (id is None) & (rd is None):
+            raise ValueError('Must specify either `id` or `rd`')
+        
+        try:
+            ix = np.where(self.phot['number']  == id)[0][0]
+        except:
+            if rd is None:
+                raise ValueError(f'#{id} not in catalog, must specify `rd`.')
+            
+        #############
+        # Image data
+        
+        # model component
+        try:
+            comp = self.comp_to_patch(id, full_image=True, flatten=False)
+            csum = comp.sum()
+        except:
+            comp = self.full_model*0.
+            csum = 0.
+            
+        if rd is None:
+            xy = self.lores_xy[ix,:]
+        else:
+            xy = self.lores_wcs.all_world2pix(rd[0], rd[1], 0)
+            xy = np.array(xy).flatten()
+        
+        model = self.full_model - comp
+        cleaned = (self.lores_im.data.byteswap().newbyteorder() - model)
+        
+        # Combined variance
+        if not hasattr(self, 'lores_var'):
+            var = 1/self.lores_wht
+            var[self.lores_mask == 1] = 0
+            self.lores_var = var.byteswap().newbyteorder()
+            
+        model_var = self.lores_var + (model*model_error_frac)**2
+        
+        ################
+        # Aperture photometry
+        pscale = self.lores_wcs.pscale
+        
+        apargs = ([xy[0]], [xy[1]], np.atleast_1d(aper_radius)/pscale)
+        apkwargs = dict(var=model_var, mask=(self.full_mask == 0))
+        
+        apflux, aperr, apflag = sep.sum_circle(cleaned, *apargs, **apkwargs)
+        cflux, cerr, cflag = sep.sum_circle(comp, *apargs, **apkwargs)
+        
+        if np.atleast_1d(aper_radius).size == 1:
+            aper_data = [apflux[0], aperr[0], apflag[0], cflux[0], csum]
+        else:
+            aper_data = [apflux, aperr, apflag, cflux, csum]
+                    
+        #print(apflux[0][0], apflux[1][0], compflux[0], comp.sum(), )
+        
+        if make_figure:
+            
+            if (csum <= 0) & (vm is 'Auto'):
+                vm = 'Default'
+                
+            if vm is 'Auto':
+                if 'LogSt' in stretch.__str__():
+                    vm = np.array([-0.001, 0.11])*0.3*csum
+                else:
+                    vm = np.array([-0.02, 0.11])*0.2*csum
+            elif vm is 'Default':
+                if 'LogSt' in stretch.__str__():
+                    vm = np.array([-0.001, 0.11])*1.5
+                else:
+                    vm = np.array([-0.02, 0.11])*1.5
+            
+            # Normalizer
+            imgnorm = ImageNormalize(vmin=vm[0], vmax=vm[1], stretch=stretch)
 
+            # Cutout size
+            N = int(np.mean(aper_radius)*fig_grow/pscale)
+
+            fig = plt.figure(figsize=[12,3])
+            
+            # Original data
+            ax = fig.add_subplot(141)
+            ax.imshow((self.lores_im.data)*(self.full_mask), 
+                      cmap=cmap, norm=imgnorm)
+            
+            # Cleaned
+            ax = fig.add_subplot(142)
+            ax.imshow(cleaned*(self.full_mask), 
+                      cmap=cmap, norm=imgnorm)
+            
+            # Component model
+            ax = fig.add_subplot(143)
+            ax.imshow(comp*(self.full_mask), cmap=cmap, norm=imgnorm)
+            
+            # Object label
+            if add_label:
+                if id is not None:
+                    ax.text(0.05, 0.95, f'#{id}', ha='left', 
+                        transform=ax.transAxes, **labeleargs)
+                else:
+                    ax.text(0.05, 0.95, f'({rd[0]:.5f}, {rd[1]:.5f})',
+                            ha='left', transform=ax.transAxes, **labeleargs)
+                    
+                ax.text(0.95, 0.95, f'{self.lores_filter}', 
+                        ha='right', transform=ax.transAxes, **labeleargs)
+            
+            # Full cleaned
+            ax = fig.add_subplot(144)
+            ax.imshow((self.lores_im.data - model - comp)*(self.full_mask), 
+                      cmap=cmap, norm=imgnorm)
+            
+            for ax in fig.axes:
+                ax.set_xlim(xy[0]-N, xy[0]+N); ax.set_ylim(xy[1]-N, xy[1]+N)
+
+                # Show aperture circle
+                thet = np.linspace(0, 2*np.pi+1.e-5, 512)
+                for rad in np.atleast_1d(aper_radius):
+                    ax.plot(np.cos(thet)*rad/pscale+xy[0], 
+                        np.sin(thet)*rad/pscale+xy[1], **fig_apargs)
+
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+
+                ticks = np.arange(-N, N, dtick/pscale)
+                ax.set_xticks(xy[0]+ticks)
+                ax.set_yticks(xy[1]+ticks)
+
+            fig.tight_layout(pad=0.1)
+            
+        else:
+            fig = None
+            
+        return aper_data, fig
+    
+    def run_all_apertures(self, aper_radius=1.):
+        """
+        Run aperture photometry for every object in `self.phot` and add 
+        columns to the table.
+        """
+
+        col = f'{self.lores_filter}_flux_aper'
+        if self.lores_filter.startswith('ch'):
+            col = 'irac_'+col
+            
+        msg = '({0}-{1}) Photometry apertures : {2}'
+        print(msg.format(self.root, self.lores_filter, aper_radius))
+        
+        ap_flux, ap_err, ap_flag, model_flux, model_sum = [], [], [], []
+        for id in tqdm(self.phot['number']):
+            _phot, _ = self.aperture_photometry(id, rd=None, 
+                                aper_radius=aper_radius, make_figure=False)
+                                
+            ap_flux.append(_phot[0])
+            ap_err.append(_phot[1])
+            ap_flag.append(_phot[2])
+            model_flux.append(_phot[3])
+        
+        self.phot[col] = ap_flux
+        self.phot[col.replace('flux_aper', 'fluxerr_aper')] = ap_err
+        self.phot[col.replace('flux_aper', 'flag_aper')] = ap_flag
+        self.phot[col.replace('flux_aper', 'model_aper')] = model_flux
+        
+        pops = []
+        for k in self.phot.meta:
+            if k.startswith(f'{self.lores_filter}_aper'):
+                pops.append(k)
+        for k in pops:
+            self.phot.meta.pop(k)
+        
+        for i, ap in enumerate(np.atleast_1d(aper_radius)):
+            self.phot.meta[f'{self.lores_filter}_aper{i}'] = ap
+            
+                
 RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None, 'use_avg_psf':True} 
       
 def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, display_mosaics=True, **kwargs):
