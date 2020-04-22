@@ -1312,7 +1312,7 @@ class MipsPSF(object):
         return psf, None, None
         
 class MixturePSF(object):
-    def __init__(self, N=3, rmax=10, rs=None, ee1=0., ee2=0., window=None):
+    def __init__(self, N=3, rmin=1, rmax=10, rs=None, ee1=0., ee2=0., window=None):
         """
         Mixture of Gaussians PSF from `~tractor`.
         """
@@ -1322,7 +1322,7 @@ class MixturePSF(object):
         self.N = N
         if rs is None:
             #rs = [np.log(2 * (r+1)) for r in range(N)]
-            rs = np.linspace(np.log(1), np.log(rmax), N)
+            rs = np.linspace(np.log(rmin), np.log(rmax), N)
 
         self.mogs = [GaussianMixtureEllipsePSF(np.array([1]), np.array([[0., 0.]]), [EllipseESoft(r, ee1, ee2)]) for r in rs]
         self.coeffs = np.ones(N)
@@ -1341,7 +1341,7 @@ class MixturePSF(object):
         self.bounds_amp = (-1, 1)
         self.bounds_x = (-3, 3)
         self.bounds_y = (-3, 3)
-        self.bounds_logr = (-0.5, 3)
+        self.bounds_logr = (np.log(0.5*rmin), np.log(2*rmax))
         self.bounds_ee1 = (-1, 1)
         self.bounds_ee2 = (-1, 1)
         
@@ -1362,7 +1362,7 @@ class MixturePSF(object):
         return (lo, hi)
     
     @staticmethod
-    def elipse_from_baphi(ba, phi):
+    def ellipse_from_baphi(ba, phi):
         """
         Generate ellipse parameters e1, e2 from ba=b/a and phi PA in degrees
         """
@@ -1462,7 +1462,7 @@ class MixturePSF(object):
         pars = [0.5, 0., 0., r, e1, e2]
         self.mogs[comp].setAllParams(pars) 
         
-    def from_cutout(self, input, pixscale=None, show=True, fit_ellipse=True):
+    def from_cutout(self, input, mask=None, pixscale=None, show=True, fit_ellipse=True, verbose=True, center_first=True, lsq_kwargs={'ftol':1.e-8, 'xtol':1.e-8, 'gtol':1.e-8, 'loss':'arctan', 'method':'trf', 'max_nfev':200}, indices=None, **kwargs):
         """
         Generate a MixturePSF from a cutout.
         
@@ -1477,7 +1477,10 @@ class MixturePSF(object):
         if isinstance(input, str):
             psf = pyfits.open(input)
             cutout = psf[0].data
-
+            
+            if mask is -1:
+                mask = cutout > 0
+                
             try:
                 wcs = pywcs.WCS(psf[0].header)
                 self.orig_pixscale = utils.get_wcs_pscale(wcs)
@@ -1495,29 +1498,40 @@ class MixturePSF(object):
         xpo, ypo = np.meshgrid(xarr, xarr)           
         pos = np.array([xpo.flatten(), ypo.flatten()]).T 
 
-        # Centroid
-        cx = (xpo*cutout).sum()/cutout.sum()
-        cy = (ypo*cutout).sum()/cutout.sum()
-        for mog in self.mogs:
-            mog.meanx0 = cx#+1
-            mog.meany0 = cy#+1
+        if center_first:
+            # Centroid
+            cx = (xpo*cutout).sum()/cutout.sum()
+            cy = (ypo*cutout).sum()/cutout.sum()
+            for mog in self.mogs:
+                mog.meanx0 = cx#+1
+                mog.meany0 = cy#+1
 
-        # Centers
-        self.indices = np.arange(1,3)
-        args = (self, cutout, pos, np.linalg.lstsq, 'lm')
-        margs = (self, cutout, pos, np.linalg.lstsq, 'model')
-        xi = self.getParams()
-        _x0 = least_squares(self._objmog, xi, method='trf', bounds=self.bounds, args=args)
-        x0 = _x0.x
-        a0, m0 = self._objmog(x0, *margs)
-        self.coeffs = a0[1:]
+            # Centers
+            if verbose > 0:
+                print('\n\nFit centers\n\n')
 
+            self.indices = np.arange(1,3)
+            args = (self, cutout, mask, pos, np.linalg.lstsq, verbose, 'lm')
+            margs = (self, cutout, mask, pos, np.linalg.lstsq, verbose, 'model')
+            xi = self.getParams()
+            _x0 = least_squares(self._objmog, xi, bounds=self.bounds, args=args, **lsq_kwargs)
+            x0 = _x0.x
+            a0, m0 = self._objmog(x0, *margs)
+            self.coeffs = a0[1:]
+            
         # Fit all params
-        self.indices = np.arange(1,4+fit_ellipse*2)
-        args = (self, cutout, pos, np.linalg.lstsq, 'lm')
-        margs = (self, cutout, pos, np.linalg.lstsq, 'model')
+        if verbose > 0:
+            print('\n\nFit full\n\n')
+            
+        if indices is None:
+            self.indices = np.arange(1+2*center_first, 4+fit_ellipse*2)
+        else:
+            self.indices = indices
+            
+        args = (self, cutout, mask, pos, np.linalg.lstsq, verbose, 'lm')
+        margs = (self, cutout, mask, pos, np.linalg.lstsq, verbose, 'model')
         xi = self.getParams()
-        _x3 = least_squares(self._objmog, xi, method='trf', bounds=self.bounds, args=args)
+        _x3 = least_squares(self._objmog, xi, bounds=self.bounds, args=args, **lsq_kwargs)
         x3 = _x3.x
         a3, m3 = self._objmog(x3, *margs)
         self.coeffs = a3[1:]
@@ -1546,7 +1560,7 @@ class MixturePSF(object):
             fig.tight_layout(pad=0.1)
 
     @staticmethod        
-    def _objmog(theta, mixpsf, cutout, pos, lsq, ret):
+    def _objmog(theta, mixpsf, cutout, mask, pos, lsq, verbose, ret):
         mixpsf.setParams(theta)
         cflat = cutout.flatten()
         _X = np.hstack([cflat[:,None]*0.+1, mixpsf.get_matrix(pos)])
@@ -1558,8 +1572,10 @@ class MixturePSF(object):
             return _res[0], model.reshape(cutout.shape) - _res[0][0]
 
         chi2 = (model - cflat)
-
-        if ret.endswith('v'):
+        if mask is not None:
+            chi2 = chi2[mask.flatten()]
+            
+        if (verbose & 2) > 0:
             print(theta, (chi2**2).sum())
 
         if ret.startswith('chi2'):
