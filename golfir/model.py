@@ -448,10 +448,18 @@ class ImageModeler(object):
             self.lores_psf_obj = irac_psf_obj
         else:
             self.lores_psf_obj = psf_obj
+        
+        if 'PHOTFNU' in irac_im.header:
+            to_ujy = irac_im.header['PHOTFNU']/1.e-6
+            print('Scale to uJy: {0:.2f}'.format(to_ujy))
+        else:
+            to_ujy = 1.
             
         self.lores_im = irac_im
+        self.lores_im.data *= to_ujy
+        
         self.lores_shape = self.lores_im.data.shape
-        self.lores_wht = irac_wht
+        self.lores_wht = irac_wht/to_ujy**2
         self.lores_wcs = irac_wcs
         self.lores_xy = irac_wcs.all_world2pix(self.phot['ra'], 
                                                self.phot['dec'], 0)
@@ -1946,7 +1954,7 @@ class ImageModeler(object):
         msg = '({0}-{1}) Photometry apertures : {2}'
         print(msg.format(self.root, self.lores_filter, aper_radius))
         
-        ap_flux, ap_err, ap_flag, model_flux, model_sum = [], [], [], []
+        ap_flux, ap_err, ap_flag, model_flux = [], [], [], []
         for id in tqdm(self.phot['number']):
             _phot, _ = self.aperture_photometry(id, rd=None, 
                                 aper_radius=aper_radius, make_figure=False)
@@ -1960,6 +1968,8 @@ class ImageModeler(object):
         self.phot[col.replace('flux_aper', 'fluxerr_aper')] = ap_err
         self.phot[col.replace('flux_aper', 'flag_aper')] = ap_flag
         self.phot[col.replace('flux_aper', 'model_aper')] = model_flux
+        
+        #tot_corr = self.phot[f'{self.lores_filter}_flux']/model_flux
         
         pops = []
         for k in self.phot.meta:
