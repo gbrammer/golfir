@@ -535,7 +535,8 @@ def redrizzle_mosaics(cat_kwargs={}, pad=60):
         phot_scl = 10**(0.4*med_dmag)
         
         ZPi = 25+med_dmag        
-        ZP = 26
+        #ZP = 26
+        ZP = 23.9
         zp26 = 10**(-0.4*(25-ZP)) # 26
         
         # Image quality
