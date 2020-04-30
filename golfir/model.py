@@ -327,7 +327,10 @@ class ImageModeler(object):
         markers[yi[clip], xi[clip]] = self.phot['number'][clip]
         
         waterseg = watershed(-hst_conv, markers, mask=(hst_conv/np.sqrt(hst_cvar) > 1))
+        
+        # Fill watershed with original segments
         waterseg[waterseg == 0] = self.hst_seg[waterseg == 0]
+        waterseg[self.hst_seg > 0] = self.hst_seg[self.hst_seg > 0]
         
         self.waterseg = waterseg
         
@@ -1216,12 +1219,16 @@ class ImageModeler(object):
                 if match_geometry:
                     ix = phot['number'] == id_i
                     q = (phot['b_image']/phot['a_image']).data[ix][0]
-                    pa = phot['theta_image'].data[ix][0]/np.pi*180+90
+                    pa = phot['theta_image'].data[ix][0]/np.pi*180-90
                     keys['pa'] = pa
                     keys['q'] = q
-                    print('Fix parameters {0} for id={1}'.format(keys, id_i))
-                    keys['fix'] = {'q':0, 'pa':0}
-
+                    msg = 'parameters {0} for id={1}'.format(keys, id_i)
+                    if match_geometry == 1:
+                        print('Fix '+msg)
+                        keys['fix'] = {'q':0, 'pa':0}
+                    else:
+                        print('Initialize '+msg)
+                        
                 components += [galfit.GalfitSersic(**keys)]#, R_e=0.5)]
             
             # Evaluate PSF at location of object
@@ -1356,17 +1363,26 @@ class ImageModeler(object):
             j = i+2
             pars = {'id':id, 'type':im[1].header[f'COMP_{j}'], 'll':self.patch_ll}
             
+            # Translate param names
             trans = {'ar':'q'}
             
             for k in im[1].header:
                 if k.startswith(f'{j}_'):
                     val = im[1].header[k]
                     star = ('*' in val)*1
+                    if star > 0:
+                        val = val.replace('*','')
+                        
+                    # remove [] for fixed parameters
+                    if '[' in val:
+                        val = val.strip('[]')
+
+                    # Rename parameter
                     kspl = k.split('_')[1].lower()
                     if kspl in trans:
                         kspl = trans[kspl]
                         
-                    pars[kspl] = (float(val.replace('*','').split()[0]), star)
+                    pars[kspl] = (float(val.split()[0]), star)
             
             msg = f'insert_galfit_models: {pars}'        
             grizli.utils.log_comment(self.LOGFILE, msg, verbose=self.verbose, 
@@ -1564,7 +1580,7 @@ class ImageModeler(object):
         self.comp_hdu.writeto(component_file, overwrite=True)
                 
 
-    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, align_type=3, **kwargs):
+    def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_niter=1, galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, align_type=3, **kwargs):
         """
         Run the multi-step process on a single patch
         """
@@ -1612,6 +1628,7 @@ class ImageModeler(object):
             if galfit_flux_limit > 0:
                 fit_bright = self.patch_obj_coeffs > galfit_flux_limit
             else:
+                # If galfit_flux_limit < 0, then take as S/N limit
                 flux = self.patch_obj_coeffs*1
                 covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
                 err = np.sqrt(covar.diagonal())[self.Nbg:]
@@ -1626,21 +1643,22 @@ class ImageModeler(object):
             #fit_with_psf=False
             fit_with_psf = self.phot['flux_radius'][ix][fit_bright][so] < 0
             
-            for id, is_psf in zip(bright_ids, fit_with_psf):
-                if is_psf:
-                    comp = 'psf'
-                else:
-                    comp = None
+            for iter in range(galfit_niter):
+                for id, is_psf in zip(bright_ids, fit_with_psf):
+                    if is_psf:
+                        comp = 'psf'
+                    else:
+                        comp = None
                 
-                self.patch_fit_galfit(ids=[id], component_type=comp,
-                                      chi2_threshold=10, 
-                                      match_geometry=match_geometry, 
-                                      **galfit_kwargs)
+                    self.patch_fit_galfit(ids=[id], component_type=comp,
+                                          chi2_threshold=10, 
+                                          match_geometry=match_geometry, 
+                                          **galfit_kwargs)
             
-                if ds9:
-                    ds9.frame(18)
-                    ds9.view(self.patch_resid*self.patch_mask,
-                             header=self.patch_header)
+                    if ds9:
+                        ds9.frame(18)
+                        ds9.view(self.patch_resid*self.patch_mask,
+                                 header=self.patch_header)
                    
         # Refine error scaling
         if rescale_uncertainties:
@@ -1683,6 +1701,9 @@ class ImageModeler(object):
                 ds9.view(self.patch_resid*self.patch_mask,
                          header=self.patch_header)
                                 
+        # Display final model
+        if ds9:
+            self.patch_display(ds9=ds9)
             
         # Save diagnostic figure
         self.patch_display(ds9=None)
@@ -1982,7 +2003,7 @@ class ImageModeler(object):
             self.phot.meta[f'{self.lores_filter}_aper{i}'] = ap
             
                 
-RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':20, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None, 'use_avg_psf':True} 
+RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':-20, 'match_geometry':2, 'galfit_niter':2, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None, 'use_avg_psf':True} 
       
 def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, display_mosaics=True, **kwargs):
     """
