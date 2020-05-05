@@ -8,8 +8,12 @@ from astropy.time import Time
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 
-from tristars import match
 from skimage.morphology import binary_dilation
+
+try:
+    from tristars import match
+except:
+    print("(golfir.hawki) Warning: failed to import tristars")
 
 try:
     from grizli import prep, utils
