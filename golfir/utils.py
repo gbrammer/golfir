@@ -8,15 +8,18 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 
-import drizzlepac
-
-from . import irac
-
+try:
+    import drizzlepac
+except:
+    print("(golfir.utils) Warning: failed to import drizzlepac")
+    
 try:
     import grizli.utils
 except:
     print("(golfir.utils) Warning: failed to import grizli")
-    
+
+from . import irac
+
 # try:
 #     import grizli.ds9
 #     ds9 = grizli.ds9.DS9()
