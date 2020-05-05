@@ -15,8 +15,16 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 
-from grizli import utils, prep
-
+try:
+    from drizzlepac.astrodrizzle import ablot
+except:
+    print("(golfir.irac) Warning: failed to import drizzlepac")
+    
+try:
+    from grizli import utils, prep
+except:
+    print("(golfir.irac) Warning: failed to import grizli")
+    
 def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True, global_mask=''):
     """
     """
@@ -552,7 +560,6 @@ class IracAOR():
             return med_wcs, med.data
         
     def blot(self, med_wcs, med, interp='poly5'):
-        from drizzlepac.astrodrizzle import ablot
     
         blot_data = np.zeros(self.cbcd.shape, dtype=np.float32)
         for i in range(self.N):

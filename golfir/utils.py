@@ -1,16 +1,22 @@
 import os
 import glob
 import numpy as np
-from grizli import utils
-from imp import reload
+
 import matplotlib.pyplot as plt
+
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
+
 import drizzlepac
 
 from . import irac
 
+try:
+    import grizli.utils
+except:
+    print("(golfir.utils) Warning: failed to import grizli")
+    
 # try:
 #     import grizli.ds9
 #     ds9 = grizli.ds9.DS9()
@@ -22,7 +28,8 @@ def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'
     Fetch IRAC and MIPS images listed in a `ipac.fits` catalog generated 
     by `mastquery`.
     """
-    ipac = utils.read_catalog(path+'{0}_ipac.fits'.format(root))
+    
+    ipac = grizli.utils.read_catalog(path+'{0}_ipac.fits'.format(root))
     
     ch_trans = {'ch1': 'IRAC 3.6um',
                 'ch2': 'IRAC 4.5um',
@@ -50,7 +57,7 @@ def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'
         if ch.startswith('mips'):
             # Only EBCD MIPS files
             test = ipac['wavelength'] == ch_trans[ch]
-            ebcd = utils.column_string_operation(ipac['externalname'], 
+            ebcd = grizli.utils.column_string_operation(ipac['externalname'], 
                                                   '_ebcd', 'count','or')
             keep |= test & ebcd
         else:
@@ -60,7 +67,7 @@ def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'
     
     # All exposures of an AOR that overlaps at at
     if force_hst_overlap:
-        keep &= utils.column_values_in_list(ext, ext_list)
+        keep &= grizli.utils.column_values_in_list(ext, ext_list)
     
     # Explicit overlap for every exposure
     if force_hst_overlap > 1:
@@ -152,8 +159,12 @@ def run_irac(root='j003528m2016'):
     fetch_irac(root)
         
 def process_all(root):
-            
-    ipac = utils.read_catalog('../{0}_ipac.fits'.format(root))
+    """
+    Run the whole pipeline
+    """
+    import grizli.utils
+    
+    ipac = grizli.utils.read_catalog('../{0}_ipac.fits'.format(root))
     ch1 = ipac['wavelength'] == 'IRAC 3.6um'
     if False & ((root == 'j095532p1809') | (ch1.sum() > 150)):
         pixfrac, pix, kernel = 0.2, 0.5, 'point'
@@ -164,12 +175,13 @@ def process_all(root):
     
     if True:
         wcslist = get_wcslist(skip=10)
-        out_hdu = utils.make_maximal_wcs(wcslist, pixel_scale=pix, theta=0, pad=5, get_hdu=True, verbose=True)
+        out_hdu = grizli.utils.make_maximal_wcs(wcslist, pixel_scale=pix,
+                           theta=0, pad=5, get_hdu=True, verbose=True)
     else:
         out_hdu = None
     
     # Table copy
-    phot = utils.read_catalog('{0}_phot.fits'.format(root))
+    phot = grizli.utils.read_catalog('{0}_phot.fits'.format(root))
     for ch in [1,2]:
         phot['irac_ch{0}_flux'.format(ch)] = -99.
         phot['irac_ch{0}_err'.format(ch)] = -99.
@@ -179,7 +191,7 @@ def process_all(root):
     # Make sure pixels align
     ref_file = glob.glob('{0}-f1*_drz_sci.fits'.format(root))[-1]
     ref_hdu = pyfits.open(ref_file)[0].header
-    ref_filter = utils.get_hst_filter(ref_hdu).lower()
+    ref_filter = grizli.utils.get_hst_filter(ref_hdu).lower()
     
     ref_wcs = pywcs.WCS(ref_hdu)
     ref_rd = ref_wcs.all_pix2world(np.array([[-0.5, -0.5]]), 0).flatten()
@@ -290,7 +302,8 @@ def process_all(root):
             
     wcslist=None
     #wcslist = [pywcs.WCS(pyfits.open('j015020m1006-ir_drz_sci.fits')[0].header)]
-    out_hdu = utils.make_maximal_wcs(all_wcs, pixel_scale=pix, theta=0, pad=0, get_hdu=True, verbose=True)
+    out_hdu = grizli.utils.make_maximal_wcs(all_wcs, pixel_scale=pix, theta=0, 
+                                            pad=0, get_hdu=True, verbose=True)
         
     for i, aor in enumerate(aors):
         print(i, aor, aors[aor].N)
@@ -328,14 +341,13 @@ def process_all(root):
     from grizli.pipeline import auto_script, photoz
     from grizli import prep
     import astropy.units as u
-    from grizli import utils
     import numpy as np
     import astropy.io.fits as pyfits
     
     args = auto_script.get_yml_parameters(local_file='{0}.auto_script.yml'.format(root), copy_defaults=False, verbose=True, skip_unknown_parameters=True)
     multiband_catalog_args = args['multiband_catalog_args'].copy()
     
-    tab = utils.read_catalog('{0}_phot.fits'.format(root))
+    tab = grizli.utils.read_catalog('{0}_phot.fits'.format(root))
     seg_data = pyfits.open('{0}-ir_seg.fits'.format(root))[0].data
     seg_data = np.cast[np.int32](seg_data)
 
@@ -410,7 +422,7 @@ def process_all(root):
     ref_file = ref_file[-1]
     
     hst_im = pyfits.open(ref_file)
-    ref_filter = utils.get_hst_filter(hst_im[0].header).lower()
+    ref_filter = grizli.utils.get_hst_filter(hst_im[0].header).lower()
     hst_wht = pyfits.open(ref_file.replace('_sci', '_wht'))
     hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(root, 'f160w'))[1].data
     
@@ -424,7 +436,7 @@ def process_all(root):
     hst_ujy = hst_im[0].data*hst_im[0].header['PHOTFNU'] * 1.e6
     hst_wcs = pywcs.WCS(hst_im[0].header)
 
-    phot = utils.read_catalog('{0}irac_phot.fits'.format(root))
+    phot = grizli.utils.read_catalog('{0}irac_phot.fits'.format(root))
     
     # Watershed segmentation dilation
     from skimage.morphology import watershed
@@ -488,14 +500,14 @@ def process_all(root):
         irac_wht = pyfits.open('{0}-ch{1}_drz_wht.fits'.format(root, ch))[0].data
         irac_psf_obj = irac.IracPSF(ch=ch, scale=0.1, verbose=True, avg_psf=avg_psf)
         try:
-            ir_tab = utils.read_catalog('{0}-ch{1}.cat.fits'.format(root, ch))
+            ir_tab = grizli.utils.read_catalog('{0}-ch{1}.cat.fits'.format(root, ch))
             ERR_SCALE = ir_tab.meta['ERR_SCALE']
         except:
             ERR_SCALE = 1.
                     
         try:
             irac_wcs = pywcs.WCS(irac_im.header)
-            pscale = utils.get_wcs_pscale(irac_wcs)
+            pscale = grizli.utils.get_wcs_pscale(irac_wcs)
             pf = int(np.round(pscale/0.1))
         except:
             pf = 5
@@ -578,7 +590,7 @@ def process_all(root):
             
             seg_sl = hst_seg.data[sly, slx]*1
             ids = np.unique(seg_sl)[1:]
-            in_seg = utils.column_values_in_list(phot['number'], ids) & (phot['mag_auto'] < 26)
+            in_seg = grizli.utils.column_values_in_list(phot['number'], ids) & (phot['mag_auto'] < 26)
             in_seg &= np.isfinite(phot[ref_filter+'_fluxerr_aper_1'])
             in_seg &= phot[ref_filter+'_fluxerr_aper_1'] > 0
             
@@ -859,7 +871,7 @@ def process_all(root):
         # compute error scale
         resid = (irac_im.data[isly, islx]-h_model).flatten()*sivar
         rmask = msk & (h_model.flatten()*sivar < 1)
-        ERR_SCALE_i = utils.nmad(resid[rmask]) 
+        ERR_SCALE_i = grizli.utils.nmad(resid[rmask]) 
         print('ERR_SCALE_i: {0:.3f}'.format(ERR_SCALE_i))
         ERR_SCALE *= ERR_SCALE_i
         
@@ -916,14 +928,13 @@ def process_all(root):
             msk = (model[0].data*np.sqrt(wht[0].data) < 1) & (wht[0].data > 0)
             msk *= model[0].data > 0
             
-            err_scale = utils.nmad((clean*np.sqrt(wht[0].data))[msk])
+            err_scale = grizli.utils.nmad((clean*np.sqrt(wht[0].data))[msk])
             im_err = 1/np.sqrt(wht[0].data)*err_scale
             im_err[wht[0].data == 0] = 100
             
             x, y = wcs.all_world2pix(phot['ra'], phot['dec'], 0)
             ap_radius = 1.5 # arcsec
             ap_flux, ap_err, flg = sep.sum_circle(clean, x, y, ap_radius/(pf/10.), err=im_err, var=None, mask=None, maskthresh=0.0, segmap=None, seg_id=None,  bkgann=None, gain=None, subpix=5)
-            
             
     ####################### Save results 
     full_model = irac_im.data*0
@@ -1211,6 +1222,8 @@ def fit_point_source(t0, poly_order=5):
     return _psf
     
 def alma_source():
+    import grizli.utils
+    
     # ALMA source
     if False:
         # zero-out nearby object
@@ -1229,7 +1242,7 @@ def alma_source():
         rq, dq = 205.5337798, 9.477328082
         rr, dd = rg, dg
         
-        phot = utils.read_catalog('{0}irac_phot_apcorr.fits'.format(root))
+        phot = grizli.utils.read_catalog('{0}irac_phot_apcorr.fits'.format(root))
 
         irac_im = pyfits.open('{0}-ch{1}_drz_sci.fits'.format(root, ch))[0]
         irac_wht = pyfits.open('{0}-ch{1}_drz_wht.fits'.format(root, ch))[0].data
@@ -1265,7 +1278,7 @@ def alma_source():
         pixscale += [0.5]
         width = [0.25]*2
         
-        alm = utils.read_catalog('alma.info', format='ascii')
+        alm = grizli.utils.read_catalog('alma.info', format='ascii')
         alm['wave'] = 2.99e8/alm['CRVAL3']/1.e-6*u.micron
         alm['wave'].format = '.1f'
         
@@ -1308,7 +1321,7 @@ def alma_source():
         plt.errorbar(wlim, fnu_lim, efnu_lim, marker='v', alpha=0.5, linestyle='None', color='k')
         parent_lim = ['f125w_limit','f105w_limit','f814w_limit']
         
-        tab = utils.GTable()
+        tab = grizli.utils.GTable()
         tab['wave'] = wave + wave_lim; tab['wave'].unit = u.micron
         tab['dw'] = width + width_lim; tab['dw'].unit = u.micron
         tab['fnu'] = fnu + fnu_lim; tab['fnu'].unit = u.microJansky
@@ -1323,7 +1336,7 @@ def alma_source():
             if 'fnu' in c:
                 tab[c].format = '.3f'
                 
-        jname = utils.radec_to_targname(ra=rg, dec=dg, round_arcsec=(0.01, 0.01*15), precision=2, targstr='j{rah}{ram}{ras}.{rass}{sign}{ded}{dem}{des}.{dess}', header=None)
+        jname = grizli.utils.radec_to_targname(ra=rg, dec=dg, round_arcsec=(0.01, 0.01*15), precision=2, targstr='j{rah}{ram}{ras}.{rass}{sign}{ded}{dem}{des}.{dess}', header=None)
         so = np.argsort(tab['wave'])
         
         tab[so].write('alma_serendip_{0}.fits'.format(jname), overwrite=True)
@@ -1483,6 +1496,7 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     Drizzle effective PSF model given the oversampled model PRF
     """
     from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
+    import grizli.utils
     
     # r48106752/ch1/bcd/SPITZER_I1_48106752_0001_0000_2_cbcd.fits
     ch = int(log['file'][0].split("_")[1][-1])
@@ -1569,7 +1583,7 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
                 sip_h[key] = log['cd'][k][i,j]
         
         wcs_i = pywcs.WCS(sip_h, relax=True)
-        wcs_i.pscale = utils.get_wcs_pscale(wcs_i)
+        wcs_i.pscale = grizli.utils.get_wcs_pscale(wcs_i)
         
         sci_i = np.zeros((256,256), dtype=np.float32)
         
@@ -1617,13 +1631,14 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     for k, coo in enumerate(coords):
         print('Drizzle coords: {0}'.format(coo))
 
-        out_hdu = utils.make_wcsheader(ra=coo[0], dec=coo[1], size=size, pixscale=pixel_scale, theta=-theta, get_hdu=True)
+        out_hdu = grizli.utils.make_wcsheader(ra=coo[0], dec=coo[1], size=size, pixscale=pixel_scale, theta=-theta, get_hdu=True)
         #out_h, out_wcs = _out
         out_wcs = pywcs.WCS(out_hdu.header)
-        out_wcs.pscale = utils.get_wcs_pscale(out_wcs)
+        out_wcs.pscale = grizli.utils.get_wcs_pscale(out_wcs)
 
         if False:
-            _drz = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+            _drz = grizli.utils.drizzle_array_groups(sci_list, wht_list, 
+                     wcs_list, 
                      outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
                      verbose=False)
             
@@ -1631,11 +1646,13 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
             pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_{k}_psf.fits', data=drz_psf, overwrite=True)
         else:   
             if k == 0:
-                _drz = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+                _drz = grizli.utils.drizzle_array_groups(sci_list, wht_list, 
+                         wcs_list, 
                          outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
                          verbose=False)
             else:
-                _ = utils.drizzle_array_groups(sci_list, wht_list, wcs_list, 
+                _ = grizli.utils.drizzle_array_groups(sci_list, wht_list, 
+                         wcs_list, 
                          outputwcs=out_wcs, pixfrac=pixfrac, kernel=kernel,
                          verbose=False, data=_drz[:3])
                      

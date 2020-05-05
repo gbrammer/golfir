@@ -8,11 +8,15 @@ from astropy.time import Time
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 
-from grizli import prep, utils
 from tristars import match
 from skimage.morphology import binary_dilation
 
-import grizli.ds9
+try:
+    from grizli import prep, utils
+    import grizli.ds9
+except:
+    print("(golfir.hawki) Warning: failed to import grizli")
+    
 #ds9 = grizli.ds9.DS9()
 
 import traceback

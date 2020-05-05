@@ -14,16 +14,20 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 
-import drizzlepac
-from drizzlepac.astrodrizzle import ablot
-
-from grizli import utils
+try:
+    import drizzlepac
+    from drizzlepac.astrodrizzle import ablot
+except:
+    print("(golfir.pipeline) Warning: failed to import drizzlepac")
+    
+#from grizli import utils
 
 def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':10, 'mips':1.0}):
     
-    from golfir import irac
-    import golfir.utils
-    from golfir.utils import get_wcslist
+    from grizli import utils
+
+    from . import irac
+    from .utils import get_wcslist, fetch_irac
     
     PATH = os.path.join(home, root)
     try:
@@ -38,7 +42,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         if not os.path.exists(f'{root}_ipac.fits'):
             os.system(f'wget https://s3.amazonaws.com/{bucket}/IRAC/{root}_ipac.fits')
     
-        res = golfir.utils.fetch_irac(root=root, path='./', channels=channels)
+        res = fetch_irac(root=root, path='./', channels=channels)
         
         if res in [False, None]:
             # Nothing to do
@@ -46,7 +50,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
             print(f'### Done: \n https://s3.amazonaws.com/{bucket}/Pipeline/{root}/IRAC/{root}.irac.html')
 
-            utils.log_comment(f'/tmp/{root}.success', 'Done!', verbose=True, show_date=True)
+            utils.log_comment(f'/tmp/{root}.success', 'Done!', 
+                              verbose=True, show_date=True)
             return True
             
     # Sync CHArGE HST images

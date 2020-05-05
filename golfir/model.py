@@ -30,12 +30,19 @@ from photutils import create_matching_kernel
 from photutils import (HanningWindow, TukeyWindow, CosineBellWindow,
                        SplitCosineBellWindow, TopHatWindow)
 
-import drizzlepac
-from drizzlepac.astrodrizzle import ablot
+try:
+    import drizzlepac
+    from drizzlepac.astrodrizzle import ablot
+except:
+    print("(golfir.model) Warning: failed to import drizzlepac")
+    
 from tqdm import tqdm
 
-import grizli.utils
-
+try:
+    import grizli.utils
+except:
+    print("(golfir.model) Warning: failed to import grizli")
+    
 from . import utils
 
 # from golfir.utils import get_wcslist, _obj_shift

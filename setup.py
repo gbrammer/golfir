@@ -23,7 +23,10 @@ if True:
          'lxml>=3.8.0',
          'numpy>=1.17.0',
          'matplotlib>=3.0',
-         'tqdm>=4.0']
+         'tqdm>=4.0',
+         'stsci.convolve',
+         'scikit-image']
+         
 else:
     install_requires = []    
     
