@@ -20,6 +20,7 @@ if True:
     install_requires=[
          'astropy>=4.0',
          'photutils>=0.7.0',
+         'astroquery>=0.4.0',
          'lxml>=3.8.0',
          'numpy>=1.17.0',
          'matplotlib>=3.0',
