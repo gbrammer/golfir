@@ -15,6 +15,10 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 
+from photutils import (HanningWindow, TukeyWindow, 
+                       CosineBellWindow,
+                       SplitCosineBellWindow, TopHatWindow)
+
 try:
     from drizzlepac.astrodrizzle import ablot
 except:
@@ -1658,15 +1662,24 @@ class IracPSF(object):
                     continue
 
             log = utils.read_catalog(file)
+            
+            psf_files = [f'{aor}-ch{ch}-{scale:.1f}.{ext}.fits' 
+                         for ext in ['psf','psfr']]
+                                                         
+            psf_file = '(N/A)'
+            for pfile in psf_files:
+                if os.path.exists(pfile):
+                    psf_file = pfile
+                    break
                     
-            psf_file = '{0}-ch{1}-{2:.1f}.psf.fits'.format(aor, ch, scale)
             if verbose:
-                print('Read PSF data {0} / {1}'.format(file, psf_file))
+                print(f'load_psf_data: log={file}, psf={psf_file}')
             
             if os.path.exists(psf_file):    
                 psf = pyfits.open(psf_file)
                 psf_mask = (psf[0].data != 0)
                 psf_image = psf[0].data
+                
             else:
                 psf_image = None
                 psf_mask = None
@@ -1679,13 +1692,41 @@ class IracPSF(object):
             hull = ConvexHull(full_path.vertices)
             full_footprint = Path(full_path.vertices[hull.vertices,:])
             
-            psf_data[aor] = {'log':log, 'psf_image':psf_image, 
-                             'psf_mask':psf_mask, 'bcd_footprints':footprints, 
+            psf_data[aor] = {'log':log,  'psf_file':psf_file, 
+                             'psf_image':psf_image, 'psf_mask':psf_mask, 
+                             'bcd_footprints':footprints, 
                              'footprint': full_footprint}
-    
+        
+        # Do we need to rotate individual PSFs?
+        for k in psf_data:
+            if 'psfr.fits' in psf_data[k]['psf_file']:        
+                theta = np.mean(psf_data[k]['log']['theta'])
+                psf_i = psf_data[k]['psf_image']
+                msk_i = psf_data[k]['psf_mask']
+                
+                try:
+                    warped = warp_image(np.array([0,0,-theta,1]), psf_i)
+                    mwarped = warp_image(np.array([0,0,-theta,1]), msk_i)
+                except ValueError:
+                    psf_i = psf_i.byteswap().newbyteorder()
+                    warped = warp_image(np.array([0,0,-theta,1]), psf_i)
+                    mwarped = warp_image(np.array([0,0,-theta,1]), msk_i)
+                
+                coswindow = CosineBellWindow(alpha=1)
+                window = coswindow(warped.shape)**0.5 #0.05
+                warped *= window
+                warped /= warped.sum()
+                
+                psf_data[k]['psf_image'] = warped
+                psf_data[k]['psf_mask'] = np.isfinite(warped)
+                psf_data[k]['psf_mask'] &= warped/warped.max() > 1.e-5
+                psf_data[k]['psf_image'][~psf_data[k]['psf_mask']] = 0.
+                
         if avg_psf is None:
-            img = np.array([psf_data[k]['psf_image'].flatten() for k in psf_data])
-            msk = np.array([psf_data[k]['psf_mask'].flatten() for k in psf_data])
+            img = np.array([psf_data[k]['psf_image'].flatten() 
+                            for k in psf_data])
+            msk = np.array([psf_data[k]['psf_mask'].flatten() 
+                            for k in psf_data])
             psf_shape = psf[0].data.shape
         else:
             print('Use rotated `avg_psf`.')
@@ -1727,18 +1768,31 @@ class IracPSF(object):
         point = (ra, dec)
         for i, aor in enumerate(self.psf_data):
             if not self.psf_data[aor]['footprint'].contains_point(point):
+                #print('skip', aor); break
                 continue
                 
             for j, pat in enumerate(self.psf_data[aor]['bcd_footprints']):
                 if pat.contains_point(point):
+                    #print(i, j)
                     exptime[i] += self.psf_data[aor]['log']['exptime'][j]
                     count[i] += 1
         
         count_mask = (count > min_count)      
         if count_mask.sum() == 0:
             return np.zeros(self.psf_arrays['shape']), exptime, count
-              
-        expwht = exptime[count_mask]
+        
+        # Background higher in warm mission.  Roughly determined from GOODSN
+        mjd0 = np.array([self.psf_data[aor]['log']['mjd_obs'][0] 
+                        for aor in self.psf_data])
+        
+        if self.ch == 1:
+            warm_scale = 1+(mjd0 > 54963.0)*7
+        elif self.ch == 2:
+            warm_scale = 1+(mjd0 > 54963.0)*1
+        else:
+            warm_scale = 1.
+            
+        expwht = (exptime/warm_scale)[count_mask]
         #num = (self.psf_arrays['image']*self.psf_arrays['mask'])
         num = self.psf_arrays['masked'][count_mask].T.dot(expwht)
         den = (self.psf_arrays['mask'][count_mask]).T.dot(expwht)
