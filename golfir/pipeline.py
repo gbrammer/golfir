@@ -401,8 +401,8 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             except:
                 size = (np.round(np.array([hst_wcs._naxis[0], hst_wcs._naxis[1]])*hst_wcs.pscale*pad/pixscale)*pixscale)
             
-            _x = utils.make_wcsheader(ra=hst_wcs.wcs.crval[0], 
-                                      dec=hst_wcs.wcs.crval[1],
+            hst_rd = hst_wcs.calc_footprint().mean(axis=0)
+            _x = utils.make_wcsheader(ra=hst_rd[0], dec=hst_rd[1],
                                       size=size, 
                                       pixscale=pixscale, 
                                       get_hdu=False, theta=0)
