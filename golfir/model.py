@@ -347,6 +347,8 @@ class ImageModeler(object):
         """
         from golfir import irac
         
+        self.use_avg_psf = use_avg_psf
+        
         grizli.utils.log_comment(self.LOGFILE, 
                f'Read lores data: {self.root}-{filter}\n',
                verbose=self.verbose, show_date=True)
