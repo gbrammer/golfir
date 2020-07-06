@@ -113,10 +113,16 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         out_hdu = pyfits.open('ref_hdu.fits')[1]
     
     ########
-
-    files = glob.glob('{0}/ch*/bcd/SPITZER_I*cbcd.fits'.format(aor_query))
-    files += glob.glob('{0}/ch*/bcd/SPITZER_I*xbcd.fits.gz'.format(aor_query))
-    files += glob.glob('{0}/ch*/bcd/SPITZER_M*ebcd.fits'.format(aor_query))
+    
+    files = []
+    for ch in channels:
+        if 'mips' in ch:
+            chq = ch.replace('mips','ch')
+            files += glob.glob(f'{aor_query}/{chq}/bcd/SPITZER_M*ebcd.fits')
+        else:
+            files += glob.glob(f'{aor_query}/{ch}/bcd/SPITZER_I*cbcd.fits')
+            files += glob.glob(f'{aor_query}/{ch}/bcd/SPITZER_I*xbcd.fits.gz')
+            
     files.sort()
 
     roots = np.array([file.split('/')[0] for file in files])
@@ -303,9 +309,18 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     
     #######
     # Make more compact individual exposures and clean directories
-    wfiles = glob.glob('r*/*/bcd/*_I[1-4]_*wcs.fits')
-    wfiles += glob.glob('r*/*/bcd/*_M[1-4]_*wcs.fits')
+    wfiles = []
+    for ch in channels:
+        if 'mips' in ch:
+            chq = ch.replace('mips','ch')
+            wfiles += glob.glob(f'{aor_query}/{chq}/bcd/SPITZER_M*wcs.fits')
+        else:
+            wfiles += glob.glob(f'{aor_query}/{ch}/bcd/SPITZER_I*wcs.fits')
+
+    #wfiles = glob.glob('r*/*/bcd/*_I[1-4]_*wcs.fits')
+    #wfiles += glob.glob('r*/*/bcd/*_M[1-4]_*wcs.fits')
     wfiles.sort()
+
     for wcsfile in wfiles:
         outfile = wcsfile.replace('_wcs.fits', '_xbcd.fits.gz')
         if os.path.exists(outfile):
