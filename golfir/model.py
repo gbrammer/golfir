@@ -820,6 +820,55 @@ class ImageModeler(object):
         # Bright limits
         self.patch_bright_limits(**kwargs)
     
+    def patch_replace_model(self, id, hst_ujy=None, segmask=False, resample_method='rescale'):
+        """
+        Regenerate the IRAC model for a given source using a different HST 
+        image.
+        """
+        
+        phot = self.phot
+        
+        ix = phot['number'] == id
+        
+        patch_xy = self.lores_xy[self.patch_ids-1,:] - self.patch_ll
+        
+        xy_warp = irac.warp_catalog(self.patch_transform, patch_xy, 
+                                    self.patch_sci.reshape(self.patch_shape),
+                                    center=None)
+        xy_offset = xy_warp - patch_xy
+        
+        my_slice = hst_ujy[self.hst_sly, self.hst_slx]*1
+        if segmask:
+            my_slice *= (self.patch_seg == id)
+            
+        _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
+                                      dec=phot['dec'][ix][0], min_count=0, 
+                                      clip_negative=True, 
+                                      transform=xy_offset[i])
+
+        lores_psf, psf_exptime, psf_count = _  
+                                    
+        if (self.psf_window is -1) | (self.psf_only):
+            psf_kernel = lores_psf
+        else:
+            #print('WINDOW {0}'.format(self.psf_window))
+            psf_kernel = create_matching_kernel(self.hst_psf_full,
+                                   lores_psf, window=self.psf_window)
+        
+                                   
+        _Ai = convolve2d(my_slice, psf_kernel,
+                          mode='constant', fft=1, cval=0.0)
+                          
+        # Reshaped
+        _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
+                               slice_if_int=True, int_tol=1.e-3, 
+                               method=resample_method, 
+                               scale_by_area=False, 
+                               verbose=False)[0]
+        
+        Aix = np.where(self.patch_ids == id)[0][0]
+        self._A[Aix,:] = _Alo.flatten()*self.pf**2
+        
     def patch_iraclean(self):
         
         yp, xp = np.indices(self.patch_shape)
@@ -1796,7 +1845,7 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
     
-    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, model_error_frac=0.1, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2), labeleargs=dict(fontsize=9, va='top')):
+    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2), labeleargs=dict(fontsize=9, va='top')):
         """
         Forced aperture photometry. 
         
@@ -1809,6 +1858,9 @@ class ImageModeler(object):
         
         aper_radius : aperture radius in arcsec, array-like for CoG
         
+        subpix : int
+            Subpixel sampling to pass to `~sep.sum_circle`.
+            
         model_error_frac : Add `model*model_error_frac` in quadrature to 
                            pixel variances.
         
@@ -1881,7 +1933,8 @@ class ImageModeler(object):
         pscale = self.lores_wcs.pscale
         
         apargs = ([xy[0]], [xy[1]], np.atleast_1d(aper_radius)/pscale)
-        apkwargs = dict(var=model_var, mask=(self.full_mask == 0))
+        apkwargs = dict(var=model_var, mask=(self.full_mask == 0), 
+                        subpix=subpix)
         
         apflux, aperr, apflag = sep.sum_circle(cleaned, *apargs, **apkwargs)
         cflux, cerr, cflag = sep.sum_circle(comp, *apargs, **apkwargs)
