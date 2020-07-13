@@ -626,7 +626,18 @@ class ImageModeler(object):
         _ = self.lores_psf_obj.evaluate_psf(ra=rd_patch[0], dec=rd_patch[1],
                                       min_count=0, clip_negative=True, 
                                       transform=None)
-
+        
+        if (_[0].max() == 0) & (self.patch_sivar.max() > 0):
+            # Set valid pixel where patch weight maximized 
+            ix = np.where(self.patch_sivar == self.patch_sivar.max())[0]
+            
+            ix_xy = np.unravel_index(ix, self.patch_shape)
+            ix_rd = self.patch_wcs.all_pix2world(ix_xy[1], ix_xy[0], 0)
+            ix_rd = np.array(ix_rd).flatten()
+            _ = self.lores_psf_obj.evaluate_psf(ra=ix_rd[0], dec=ix_rd[1],
+                                          min_count=0, clip_negative=True, 
+                                          transform=None)
+            
         lores_psf, psf_exptime, psf_count = _                              
         if (self.psf_window is -1) | (self.psf_only):
             psf_kernel = lores_psf
@@ -950,12 +961,13 @@ class ImageModeler(object):
             include_background = False
             
             if include_background:
-                _xp = np.linalg.lstsq(_Axp, _yp, rcond=-1)
+                _xp = np.linalg.lstsq(_Axp, _yp, rcond=utils.LSTSQ_RCOND)
                 pbg = _xp[0][0]
                 p_model = _Ap.T.dot(_xp[0])
                 msum = _xp[0][1:].sum()
             else:
-                _xp = np.linalg.lstsq(_Axp[:,1:], _yp, rcond=-1)
+                _xp = np.linalg.lstsq(_Axp[:,1:], _yp, 
+                                      rcond=utils.LSTSQ_RCOND)
                 pbg = 0.
                 p_model = _Ap[1:].T.dot(_xp[0])
                 msum = _xp[0].sum()
@@ -1034,7 +1046,7 @@ class ImageModeler(object):
         
         self._Ax = (_Af[:,mask]*self.patch_sivar[mask]).T
         _yx = (y*self.patch_sivar)[mask]
-        _x = np.linalg.lstsq(self._Ax, _yx, rcond=-1)
+        _x = np.linalg.lstsq(self._Ax, _yx, rcond=utils.LSTSQ_RCOND)
         
         self.patch_model = _Af.T.dot(_x[0]).reshape(self.patch_shape)
         
@@ -1309,7 +1321,13 @@ class ImageModeler(object):
                                            verbose=False)[0]
                 else:
                     galfit_psf = galfit_psf_full*1
-                    
+           
+            if galfit_psf.max() <= 0:
+                print(f'Empty PSF for id={id_i}')
+                pop_ids.append(id_i)         
+                components.pop(-1)
+                continue
+               
             xy = self.lores_xy[ix,:][0] - self.patch_ll + 0.5
             components[-1].pdict['pos'] = list(xy)
             components[-1].pdict['mag'] = 22.5
@@ -1324,7 +1342,10 @@ class ImageModeler(object):
 
         for id in pop_ids:
             fit_ids.pop(fit_ids.index(id))
-
+        
+        if len(fit_ids) == 0:
+            return None
+            
         # Model without sources to fit
         sci_cleaned = (self.patch_sci - _Af.T.dot(_c)).reshape(self.patch_shape)
 
@@ -1400,6 +1421,9 @@ class ImageModeler(object):
         
         if chi2_diff  > chi2_threshold:
             self.insert_galfit_models(ds9=ds9)
+            return True
+        else:
+            return False
             
     def insert_galfit_models(self, ds9=None):
         
@@ -1653,6 +1677,9 @@ class ImageModeler(object):
         # Initialize patch, make cutouts, etc.
         self.patch_initialize(rd_patch=rd_patch, patch_arcmin=patch_arcmin, ds9=ds9, patch_id=patch_id, bkg_kwargs=bkg_kwargs)
         
+        if not np.isfinite(self.patch_border.sum()):
+            return False
+            
         # First pass on models
         self.patch_compute_models(mag_limit=mag_limit[0], **kwargs)
         self.patch_least_squares()
@@ -1768,7 +1795,8 @@ class ImageModeler(object):
         
         # Save photometry & global model
         self.save_patch_results()
-    
+        return True
+        
     def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f160w','f140w', 'f125w', 'f110w'], **kwargs):
         """
         Generate patches to tile the field
@@ -2146,6 +2174,9 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
     for ch in channels:
         try:
             self = golfir.model.ImageModeler(root=root, lores_filter=ch, **kwargs) 
+            if not os.path.exists(f'{root}_waterseg.fits'):
+                pyfits.writeto(f'{root}_waterseg.fits', data=self.waterseg, 
+                               header=grizli.utils.to_header(self.lores_wcs))
         except:
             LOGFILE=f'{root}.modeler.log.txt'
             grizli.utils.log_exception(LOGFILE, traceback, verbose=True)

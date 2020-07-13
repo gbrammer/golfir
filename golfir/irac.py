@@ -1752,6 +1752,12 @@ class IracPSF(object):
                       'masked':masked}
         return psf_data, psf_arrays
     
+    def drizzle_psf(self, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
+        """
+        Drizzle a model PSF rather than rotating & resampling [TBD]
+        """
+        pass
+        
     def evaluate_psf(self, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
         """
         Evaluate weighted PSF at a given location using saved PSFs for each AOR

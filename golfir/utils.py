@@ -25,7 +25,10 @@ from . import irac
 #     ds9 = grizli.ds9.DS9()
 # except:
 #     ds9 = None
-    
+
+# `rcond` argument for np.linalg.lstsq  
+LSTSQ_RCOND = None
+  
 def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'], force_hst_overlap=True):
     """
     Fetch IRAC and MIPS images listed in a `ipac.fits` catalog generated 
@@ -776,7 +779,7 @@ def process_all(root):
     #bad = ~np.isfinite(_Ax)
     print('Least squares')
     
-    _x = np.linalg.lstsq(_Ax, _yx, rcond=-1)
+    _x = np.linalg.lstsq(_Ax, _yx, rcond=LSTSQ_RCOND)
 
     h_model = _Af.T.dot(_x[0]).reshape(h_sm.shape)
     
@@ -848,7 +851,7 @@ def process_all(root):
     #bad = ~np.isfinite(_Ax)
     print('Least squares')
     
-    _x = np.linalg.lstsq(_Ax, _yx, rcond=-1)
+    _x = np.linalg.lstsq(_Ax, _yx, rcond=LSTSQ_RCOND)
 
     h_model = _Af.T.dot(_x[0]).reshape(h_sm.shape)
     
@@ -891,7 +894,7 @@ def process_all(root):
 
         #bad = ~np.isfinite(_Ax)
         print('Least squares')
-        _x = np.linalg.lstsq(_Ax, _yx, rcond=-1)
+        _x = np.linalg.lstsq(_Ax, _yx, rcond=LSTSQ_RCOND)
         h_model = _Af.T.dot(_x[0]).reshape(h_sm.shape)
         
         ds9.frame(14)
@@ -1034,7 +1037,7 @@ def _obj_shift(transform, data, model, sivar, ret):
         _Ax = (_Am*sivar.flatten()).T
         _yx = (data*sivar).flatten()
 
-        _x = np.linalg.lstsq(_Ax, _yx, rcond=-1)
+        _x = np.linalg.lstsq(_Ax, _yx, rcond=LSTSQ_RCOND)
         #_a = _x[0][0]
         #warped *= _a
         warped = _Am.T.dot(_x[0]).reshape(data.shape)
@@ -1042,7 +1045,7 @@ def _obj_shift(transform, data, model, sivar, ret):
         msk = ((warped > msk_scale*data) | (warped > 0.2*warped.max())).flatten()
         #msk = ((warped > msk_scale*data)).flatten()
         print(msk.sum())
-        _x = np.linalg.lstsq(_Ax[msk,:], _yx[msk], rcond=-1)
+        _x = np.linalg.lstsq(_Ax[msk,:], _yx[msk], rcond=LSTSQ_RCOND)
         #_a = _x[0][0]
         #warped *= _a
         warped = _Am.T.dot(_x[0]).reshape(data.shape)
