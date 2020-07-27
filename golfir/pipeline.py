@@ -632,8 +632,12 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                   ' --acl public-read')
     
         if sync_xbcd:
-            os.system(f'aws s3 sync ./ s3://{bucket}/IRAC/AORS/ --exclude "*" --include "r*/ch*/bcd/*xbcd.fits.gz" --include "r*med.fits" --acl public-read')
-    
+            aor_files = glob.glob('r*-ch*med.fits')
+            for aor_file in aor_files:
+                aor = aor_file.split('-ch')[0]
+                os.system(f'aws s3 sync ./{aor}/ s3://{bucket}/IRAC/AORS/{aor}/ --exclude "*" --include "ch*/bcd/*xbcd.fits.gz" --acl public-read')
+                os.system(f'aws s3 cp {aor_file} s3://{bucket}/IRAC/AORS/ --acl public-read')
+                
     msg = f'### Done: \n    https://s3.amazonaws.com/{bucket}/Pipeline/{root}/IRAC/{root}.irac.html'
        
     utils.log_comment(f'/tmp/{root}.success', msg, verbose=True, show_date=True)
