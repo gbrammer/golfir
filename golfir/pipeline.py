@@ -22,7 +22,7 @@ except:
     
 #from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':10, 'mips':1.0}):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}):
     
     from grizli import utils
 
