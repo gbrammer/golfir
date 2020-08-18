@@ -161,7 +161,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
         if ch in ['ch3','ch4']:
             NPER, instrument = 500, 'irac'
         elif ch in ['mips1']:
-            NPER, instrument, pix = 400, 'mips'
+            NPER, instrument = 400, 'mips'
         
         min_frametime = min_frame[instrument]
         
