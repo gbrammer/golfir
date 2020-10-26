@@ -28,7 +28,10 @@ from . import irac
 
 # `rcond` argument for np.linalg.lstsq  
 LSTSQ_RCOND = None
-  
+
+# scipy.optimize.nnls kwargs
+NNLS_KWARGS = {'maxiter': None}
+
 def fetch_irac(root='j003528m2016', path='./', channels=['ch1','ch2','ch3','ch4'], force_hst_overlap=True):
     """
     Fetch IRAC and MIPS images listed in a `ipac.fits` catalog generated 

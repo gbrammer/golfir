@@ -489,6 +489,9 @@ class IracAOR():
         m = (self.cbunc > 0) & (self.dq == 0)
         res = ((self.cbcd.T-pedestal).T/self.cbunc)[m]
         nmad = utils.nmad(res)
+        if not np.isfinite(nmad):
+            nmad = 1.
+            
         self.err_scale = nmad
         self.ivar = 1/(self.cbunc*self.err_scale)**2
         self.ivar[~np.isfinite(self.ivar)] = 0
@@ -1269,14 +1272,19 @@ class ModelPSF(object):
         chi2 = (resid**2).sum()
         print(theta_scl*psf.theta_scale, chi2)
         return chi2
-        
-class MipsPSF(object):
-    def __init__(self, scale=0.1, rmax=14):
+
+MIPS_PSF_SCALE = 0.498
+            
+class FitsPSF(object):
+    def __init__(self, psf_file='/Users/gbrammer/Research/grizli/CONF/mips_24_100K.fits', scale=0.1, rmax=14, native_scale=MIPS_PSF_SCALE):
         import grizli
         
-        self.im = pyfits.open('/Users/gbrammer/Research/grizli/CONF/mips_24_100K.fits')
+        self.im = pyfits.open(psf_file)
         self.data = self.im[0].data / self.im[0].data.sum()
-        self.native_scale = 0.498 #0.5 #0.498
+        
+        self.native_scale = native_scale
+        #self.native_scale = 0.498 #0.5 #0.498
+        #self.native_scale = MIPS_PSF_SCALE #0.5 #0.498
         
         self.scale = -1
         self.rmax = -1
@@ -1321,7 +1329,16 @@ class MipsPSF(object):
         self.psf = psf
         
         return psf, None, None
-        
+
+
+def MipsPSF(**kwargs):
+    """
+    FitsPSF using MIPS 100k tabulated PSF
+    """
+    psf_file = '/Users/gbrammer/Research/grizli/CONF/mips_24_100K.fits'
+    return FitsPSF(psf_file=psf_file, scale=0.1, rmax=14, native_scale=MIPS_PSF_SCALE)
+
+
 class MixturePSF(object):
     def __init__(self, N=3, rmin=1, rmax=10, rs=None, ee1=0., ee2=0., window=None):
         """

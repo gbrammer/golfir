@@ -60,7 +60,7 @@ class model_psf(object):
         
 class ImageModeler(object):
     
-    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, **kwargs):
+    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, lsq_fitter='lstsq', **kwargs):
         self.root = root
         self.LOGFILE=f'{root}.modeler.log.txt'
         self.verbose = verbose
@@ -72,6 +72,8 @@ class ImageModeler(object):
                         
         self.psf_window = -1
         self.psf_only = psf_only
+        
+        self.lsq_fitter = lsq_fitter
         
         # Read High-res (Hubble) data
         self.read_hst_data(prefer_filter=prefer_filter)
@@ -129,10 +131,17 @@ class ImageModeler(object):
                    f'Read model file file "{model_file}".', 
                    verbose=self.verbose, show_date=True)
 
-            im_model = pyfits.open(model_file)[0]
-            self.full_model = im_model.data.byteswap().newbyteorder()
+            im_model = pyfits.open(model_file)
+            
+            self.full_model = im_model[0].data.byteswap().newbyteorder()
+            if 'BKG' in im_model:
+                self.full_bg = im_model['BKG'].data.byteswap().newbyteorder()
+            else:
+                self.full_bg = self.full_model*0
+                
         else:
             self.full_model = self.lores_im.data.byteswap().newbyteorder()*0
+            self.full_bg = self.lores_im.data.byteswap().newbyteorder()*0
         
         # testing
         if False:
@@ -719,28 +728,43 @@ class ImageModeler(object):
         self._Abg = np.array(_Abg)
         self.Nbg = self._Abg.shape[0]
         
-    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', **kwargs):
+    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', id_list=None, **kwargs):
         """
         Compute hst-to-IRAC components for objects in the patch
         """
         from golfir import irac
         
         hst_slice = self.hst_ujy[self.hst_sly, self.hst_slx]
-        ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
+        if id_list is None:
+            ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
 
-        if (self.phot['number'][ids-1] - ids).sum() == 0:
-            mtest = self.phot['mag_auto'][ids-1] < mag_limit
-            if mag_limit < 0:
-                mtest = self.phot['flux_auto'][ids-1]/self.phot['fluxerr_auto'][ids-1] > -mag_limit
-                msg = 'S/N > {0:.1f}'.format(-mag_limit, mtest.sum())
+            if (self.phot['number'][ids-1] - ids).sum() == 0:
+                mtest = self.phot['mag_auto'][ids-1] < mag_limit
+                if mag_limit < 0:
+                    mtest = self.phot['flux_auto'][ids-1]/self.phot['fluxerr_auto'][ids-1] > -mag_limit
+                    msg = 'S/N > {0:.1f}'.format(-mag_limit, mtest.sum())
+                else:
+                    msg = 'mag_auto < {0:.1f}'.format(mag_limit, mtest.sum())
+
+                ids = ids[mtest]
             else:
-                msg = 'mag_auto < {0:.1f}'.format(mag_limit, mtest.sum())
-
-            ids = ids[mtest]
+                msg = 'from segmentation'
         else:
-            msg = 'from segmentation'
+            seg_ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
+            ids = []
+            for id in id_list:
+                if id in seg_ids:
+                    ids.append(id)
             
+            if len(ids) == 0:
+                print('id_list provided but no object in patch seg')
+                return False
+                
         N = len(ids)
+        if N == 0:
+            print('No IDs found to model in the patch seg')
+            return False
+            
         self.patch_nobj = N
         self.patch_ids = ids
         
@@ -830,7 +854,9 @@ class ImageModeler(object):
         
         # Bright limits
         self.patch_bright_limits(**kwargs)
-    
+        
+        return True
+        
     def patch_replace_model(self, id, hst_ujy=None, segmask=False, resample_method='rescale'):
         """
         Regenerate the IRAC model for a given source using a different HST 
@@ -1024,17 +1050,18 @@ class ImageModeler(object):
          
         self.model_bright = self._A[bright,:].T.dot(self.Anorm[bright])
         
-    def patch_least_squares(self):
+    def patch_least_squares(self, lsq_fitter=None, nnls_pedestal=0.5):
         """
         Least squares coeffs
         """
+        from scipy.optimize import nnls
         
         msg = 'Patch least squares'
         grizli.utils.log_comment(self.LOGFILE, msg, verbose=self.verbose, 
                show_date=True)
         
         _Af = np.vstack([self._Abg, self._A])  
-        
+            
         y = self.patch_sci #self.lores_im.data[self.isly, self.islx].flatten()
         
         mask = self.patch_sivar > 0
@@ -1045,9 +1072,26 @@ class ImageModeler(object):
         self.patch_mask = mask.reshape(self.patch_shape)
         
         self._Ax = (_Af[:,mask]*self.patch_sivar[mask]).T
-        _yx = (y*self.patch_sivar)[mask]
-        _x = np.linalg.lstsq(self._Ax, _yx, rcond=utils.LSTSQ_RCOND)
-        
+
+        if lsq_fitter is None:
+            lsq_fitter = self.lsq_fitter
+
+        self.nnls_pedestal = nnls_pedestal
+        if lsq_fitter.lower() == 'nnls':
+            _yx = ((y+nnls_pedestal)*self.patch_sivar)[mask]
+        else:
+            _yx = (y*self.patch_sivar)[mask]
+                    
+        if lsq_fitter == 'lstsq':
+            _x = np.linalg.lstsq(self._Ax, _yx, rcond=utils.LSTSQ_RCOND)
+        elif lsq_fitter == 'bounded':
+            raise(NotImplementedError("Fitter 'bounded' not implemented, use 'lstsq' or 'nnls'."))
+        elif lsq_fitter == 'nnls':
+            _x = nnls(self._Ax, _yx, **utils.NNLS_KWARGS)
+            _x[0][0] -= nnls_pedestal*1.e3
+        else:
+            raise(NotImplementedError(f"Fitter '{lsq_fitter}' not implemented, use 'lstsq' or 'nnls'."))
+            
         self.patch_model = _Af.T.dot(_x[0]).reshape(self.patch_shape)
         
         self.patch_resid = self.patch_sci.reshape(self.patch_shape) - self.patch_model
@@ -1488,14 +1532,23 @@ class ImageModeler(object):
         # Image
         model_image = '{0}-{1}_model.fits'.format(self.root, self.lores_filter)
         if os.path.exists(model_image):
-            im_model = pyfits.open(model_image)[0]
-            self.full_model = im_model.data
-            h = im_model.header
+            im_model = pyfits.open(model_image)
+            self.full_model = im_model[0].data.byteswap().newbyteorder()
+            
+            if 'BKG' in im_model:
+                self.full_bg = im_model['BKG'].data.byteswap().newbyteorder()
+            else:
+                self.full_bg = self.full_model*0
+            
+            #self.full_model = im_model.data
+            h = im_model[0].header
         else:
             self.full_model = self.lores_im.data*0
+            self.full_bg = self.full_model*0
             h = self.lores_im.header
 
         self.full_model[self.isly, self.islx][self.patch_mask] = self.patch_model[self.patch_mask]
+        self.full_bg[self.isly, self.islx][self.patch_mask] = self.patch_bg[self.patch_mask]
         
         # Update patch info in header
         pk = '{0:03d}'.format(self.patch_id)
@@ -1513,6 +1566,7 @@ class ImageModeler(object):
         hdul.append(pyfits.PrimaryHDU(data=self.full_model, header=h))
         resid = (self.lores_im.data - self.full_model)
         hdul.append(pyfits.ImageHDU(data=resid, header=h, name='RESID'))
+        hdul.append(pyfits.ImageHDU(data=self.full_bg, header=h, name='BKG'))
         del(resid)
         
         hdul.writeto(model_image, overwrite=True)
@@ -1554,7 +1608,7 @@ class ImageModeler(object):
             
             phot['F325'] = phot['mips_24_flux']
             phot['E325'] = phot['mips_24_err']
-            phot.meta['{0}_apcorr'] = apcorr
+            phot.meta['{0}_apcorr'.format(column_root)] = apcorr
                     
         if self.patch_is_bright is not None:
             ix_bright = (self.patch_ids - 1)[self.patch_is_bright]
@@ -1681,7 +1735,11 @@ class ImageModeler(object):
             return False
             
         # First pass on models
-        self.patch_compute_models(mag_limit=mag_limit[0], **kwargs)
+        status = self.patch_compute_models(mag_limit=mag_limit[0], **kwargs)
+        if status is False:
+            print('`patch_compute_models` returned False')
+            return False
+            
         self.patch_least_squares()
                 
         # Alignment
@@ -1873,7 +1931,7 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
     
-    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2), labeleargs=dict(fontsize=9, va='top')):
+    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, use_valid_mask=True, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2),  labeleargs=dict(fontsize=9, va='top')):
         """
         Forced aperture photometry. 
         
@@ -1891,6 +1949,9 @@ class ImageModeler(object):
             
         model_error_frac : Add `model*model_error_frac` in quadrature to 
                            pixel variances.
+        
+        use_valid_mask : Apply a mask of pixels that are within the modeled 
+                         region of the lores mosaic.
         
         make_figure : Make a diagnostic figure
             
@@ -1946,6 +2007,8 @@ class ImageModeler(object):
             xy = np.array(xy).flatten()
         
         model = self.full_model - comp
+        model_bg = model - self.full_bg
+        
         cleaned = (self.lores_im.data.byteswap().newbyteorder() - model)
         
         # Combined variance
@@ -1954,24 +2017,32 @@ class ImageModeler(object):
             var[self.lores_mask == 1] = 0
             self.lores_var = var.byteswap().newbyteorder()
             
-        model_var = self.lores_var + (model*model_error_frac)**2
+        model_var = self.lores_var + (model_bg*model_error_frac)**2
         
         ################
         # Aperture photometry
         pscale = self.lores_wcs.pscale
         
         apargs = ([xy[0]], [xy[1]], np.atleast_1d(aper_radius)/pscale)
-        apkwargs = dict(var=model_var, mask=(self.full_mask == 0), 
-                        subpix=subpix)
+        if use_valid_mask:
+            not_valid = (self.full_mask == 0)
+        else:
+            not_valid = (self.lores_wht <= 0)
+            
+        apkwargs = dict(var=model_var, mask=not_valid, subpix=subpix)
         
         apflux, aperr, apflag = sep.sum_circle(cleaned, *apargs, **apkwargs)
         cflux, cerr, cflag = sep.sum_circle(comp, *apargs, **apkwargs)
+        mflux, merr, mflag = sep.sum_circle(model_bg, *apargs, **apkwargs)
+        bflux, berr, bflag = sep.sum_circle(self.full_bg, *apargs, **apkwargs)
         
         if np.atleast_1d(aper_radius).size == 1:
             aper_data = [apflux[0], aperr[0], apflag[0], cflux[0], csum]
+            aper_data += [mflux[0], bflux[0]]
         else:
             aper_data = [apflux, aperr, apflag, cflux, csum]
-                    
+            aper_data += [mflux, bflux]
+            
         #print(apflux[0][0], apflux[1][0], compflux[0], comp.sum(), )
         
         if make_figure:
@@ -1980,10 +2051,12 @@ class ImageModeler(object):
                 vm = 'Default'
                 
             if vm is 'Auto':
+                cmax = np.maximum(csum, 5*csum/aper_data[3]/0.3*aperr)
+                
                 if 'LogSt' in stretch.__str__():
-                    vm = np.array([-0.001, 0.11])*0.3*csum
+                    vm = np.array([-0.001, 0.11])*0.3*cmax
                 else:
-                    vm = np.array([-0.02, 0.11])*0.2*csum
+                    vm = np.array([-0.02, 0.11])*0.2*cmax
             elif vm is 'Default':
                 if 'LogSt' in stretch.__str__():
                     vm = np.array([-0.001, 0.11])*1.5
@@ -2000,7 +2073,7 @@ class ImageModeler(object):
             
             # Original data
             ax = fig.add_subplot(141)
-            ax.imshow((self.lores_im.data)*(self.full_mask), 
+            ax.imshow((self.lores_im.data - self.full_bg)*(self.full_mask), 
                       cmap=cmap, norm=imgnorm)
             
             # Cleaned
@@ -2052,33 +2125,49 @@ class ImageModeler(object):
             
         return aper_data, fig
     
-    def run_all_apertures(self, aper_radius=1.):
+    def run_all_apertures(self, selection=None, aper_radius=1., model_error_frac=0.1):
         """
         Run aperture photometry for every object in `self.phot` and add 
         columns to the table.
         """
-
+        import astropy.table
+        
         col = f'{self.lores_filter}_flux_aper'
         if self.lores_filter.startswith('ch'):
             col = 'irac_'+col
+        
+        if col.startswith('mips1'):
+            col = col.replace('mips1', 'mips_24')
             
-        msg = '({0}-{1}) Photometry apertures : {2}'
-        print(msg.format(self.root, self.lores_filter, aper_radius))
-        
-        ap_flux, ap_err, ap_flag, model_flux = [], [], [], []
-        for id in tqdm(self.phot['number']):
+        if selection is None:
+            ss = np.isfinite(self.phot['number'])
+        else:
+            ss = selection
+            
+        msg = '({0}-{1}) Photometry apertures : {2} (N={3})'
+        print(msg.format(self.root, self.lores_filter, aper_radius, ss.sum()))
+                
+        rows = []
+        names = [col.replace('flux_aper', f'{c}_aper') for c in 
+                 ['flux','err','flag','model','mtot','contam','bkg']]
+                 
+        for id in tqdm(self.phot['number'][ss]):
             _phot, _ = self.aperture_photometry(id, rd=None, 
-                                aper_radius=aper_radius, make_figure=False)
-                                
-            ap_flux.append(_phot[0])
-            ap_err.append(_phot[1])
-            ap_flag.append(_phot[2])
-            model_flux.append(_phot[3])
+                                aper_radius=aper_radius, 
+                                model_error_frac=model_error_frac, 
+                                make_figure=False)
+
+            rows.append(_phot)
         
-        self.phot[col] = ap_flux
-        self.phot[col.replace('flux_aper', 'fluxerr_aper')] = ap_err
-        self.phot[col.replace('flux_aper', 'flag_aper')] = ap_flag
-        self.phot[col.replace('flux_aper', 'model_aper')] = model_flux
+        _tab = astropy.table.Table(names=names, rows=rows)
+        
+        # Put it in the main table
+        _NP = len(self.phot)
+        for c in _tab.colnames:
+            if c not in self.phot.colnames:
+                self.phot[c] = np.full(_NP, -99, dtype=_tab[c].dtype)
+
+            self.phot[c][ss] = _tab[c]
         
         #tot_corr = self.phot[f'{self.lores_filter}_flux']/model_flux
         
@@ -2086,13 +2175,19 @@ class ImageModeler(object):
         for k in self.phot.meta:
             if k.startswith(f'{self.lores_filter}_aper'):
                 pops.append(k)
+        
         for k in pops:
             self.phot.meta.pop(k)
         
+        key = f'{self.lores_filter}_efactor'.replace('mips1','mips_24')
+        
+        self.phot.meta[key] = (model_error_frac, 'Fraction of contam model added to pixel variance')
+        
         for i, ap in enumerate(np.atleast_1d(aper_radius)):
-            self.phot.meta[f'{self.lores_filter}_aper{i}'] = ap
-            
-                
+            key = f'{self.lores_filter}_aper{i}'.replace('mips1','mips_24')
+            self.phot.meta[key] = ap
+
+
 RUN_ALL_DEFAULTS = {'ds9':None, 'patch_arcmin':1., 'patch_overlap':0.2, 'mag_limit':[24,27], 'galfit_flux_limit':-20, 'match_geometry':2, 'galfit_niter':2, 'refine_brightest':True, 'run_alignment':True, 'any_limit':18, 'point_limit':17, 'bright_sn':10, 'bkg_kwargs':{'order_npix':64}, 'channels':['ch1','ch2','ch3','ch4'], 'psf_only':False, 'use_saved_components':True, 'window':None, 'use_avg_psf':True} 
       
 def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, channels=['ch1','ch2','ch3','ch4'], fetch=True, use_patches=True, display_mosaics=True, **kwargs):
