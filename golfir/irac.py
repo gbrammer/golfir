@@ -66,6 +66,8 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
     N = len(aor_ids)
     for i, aor in enumerate(aor_ids):
         files = glob.glob('{0}/{1}/bcd/{2}'.format(aor, channel, inst_key))
+        # if len(files) > 0:
+        #     print(aor, len(files))
         if len(files) < nmin:
             continue
         
@@ -925,7 +927,8 @@ class IracAOR():
             if self.instrument == 'irac':
                 outfile = self.files[i].replace('_cbcd.fits', ext)
             else:
-                outfile = self.files[i].replace(mips_ext, ext)
+                mips_suffix = '_' + self.files[i].split('_')[-1]
+                outfile = self.files[i].replace(mips_suffix, ext)
             
             if verbose:
                 print(outfile)
