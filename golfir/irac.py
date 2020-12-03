@@ -1987,8 +1987,10 @@ def combine_products(wcsfile='r15560704/ch1/bcd/SPITZER_I1_15560704_0036_0000_6_
         
     wcs = pyfits.open(wcsfile)
     if 'SPITZER_M' in wcsfile:
-        cbcd = pyfits.open(wcsfile.replace('_wcs.fits','_ebcd.fits'))
-        cbunc = pyfits.open(wcsfile.replace('_wcs.fits','_ebunc.fits'))
+        bcd_file = glob.glob(wcsfile.replace('_wcs.fits','[_e]bcd.fits'))[0]
+        bunc_file = glob.glob(wcsfile.replace('_wcs.fits','[_e]bunc.fits'))[0]
+        cbcd = pyfits.open(bcd_file)
+        cbunc = pyfits.open(bunc_file)
     else:
         cbcd = pyfits.open(wcsfile.replace('_wcs.fits','_cbcd.fits'))
         cbunc = pyfits.open(wcsfile.replace('_wcs.fits','_cbunc.fits'))
