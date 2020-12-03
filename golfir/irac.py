@@ -1339,6 +1339,10 @@ def MipsPSF(**kwargs):
     FitsPSF using MIPS 100k tabulated PSF
     """
     psf_file = '/Users/gbrammer/Research/grizli/CONF/mips_24_100K.fits'
+    if not os.path.exists(psf_file):
+        psf_path = os.path.join(os.path.basename(__file__, 'data/psf/'))
+        psf_file = os.path.join(psf_path, 'mips_24_100K.fits')
+        
     return FitsPSF(psf_file=psf_file, scale=0.1, rmax=14, native_scale=MIPS_PSF_SCALE)
 
 
