@@ -22,7 +22,7 @@ except:
     
 #from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', mips_ext='[_e]bcd.fits', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}):
     
     from grizli import utils
 
@@ -117,8 +117,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     files = []
     for ch in channels:
         if 'mips' in ch:
-            chq = ch.replace('mips','ch')
-            files += glob.glob(f'{aor_query}/{chq}/bcd/SPITZER_M*ebcd.fits')
+            mc = ch.replace('mips','ch')
+            files += glob.glob(f'{aor_query}/{mc}/bcd/SPITZER_M*{mips_ext}')
+            files += glob.glob(f'{aor_query}/{mc}/bcd/SPITZER_M*xbcd.fits.gz')
         else:
             files += glob.glob(f'{aor_query}/{ch}/bcd/SPITZER_I*cbcd.fits')
             files += glob.glob(f'{aor_query}/{ch}/bcd/SPITZER_I*xbcd.fits.gz')
@@ -190,7 +191,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
 
             # Pipeline
             if instrument == 'mips':
-                aors_ch[ch] = irac.process_all(channel=ch.replace('mips','ch'), output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, align_threshold=0.15, radec=radec, run_alignment=False, mips_ext='_ebcd.fits', ref_seg=ref_seg, global_mask=root+'_mask.reg')
+                aors_ch[ch] = irac.process_all(channel=ch.replace('mips','ch'), output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, align_threshold=0.15, radec=radec, run_alignment=False, mips_ext=mips_ext, ref_seg=ref_seg, global_mask=root+'_mask.reg')
             else:
                 aors_ch[ch] = irac.process_all(channel=ch, output_root=root_i, driz_scale=initial_pix, kernel=kernel, pixfrac=pixfrac, wcslist=None, pad=0, out_hdu=out_hdu, aor_ids=aor_ids, flat_background=False, two_pass=True, min_frametime=min_frametime, instrument=instrument, radec=radec, run_alignment=run_alignment, assume_close=assume_close, ref_seg=ref_seg, global_mask=root+'_mask.reg')
 
