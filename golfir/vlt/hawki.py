@@ -103,7 +103,7 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     os.chdir(dirs[1])
 
     if fetch:
-        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), continuation=True, request_id=request_id)
+        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), continuation=True, request_id=request_id, unzip=False)
     
         files = glob.glob('*.Z')
         files.sort()
