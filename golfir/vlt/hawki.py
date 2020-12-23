@@ -65,7 +65,7 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
     else:
         print('Problem?')
         
-def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, ob_minexp=8, **kwargs):
+def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -107,7 +107,7 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     os.chdir(dirs[1])
 
     if fetch:
-        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), continuation=True, request_id=request_id, unzip=False)
+        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), request_id=request_id, **retrieve_kwargs)
     
         files = glob.glob('*.Z')
         files.sort()
