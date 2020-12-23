@@ -65,7 +65,7 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
     else:
         print('Problem?')
         
-def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, **kwargs):
+def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, ob_minexp=8, **kwargs):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -77,18 +77,22 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     
     tab = utils.read_catalog(root+'_hawki.fits')
     
-    if ob_indices is None:
-        datasets = tab['DP.ID']
-    else:
-        ob_start = np.where(tab['TPL EXPNO'] == 1)[0]
-        ob_end = np.roll(ob_start, -1)
-        ob_end[-1] = len(tab)
-        ob_nexp = ob_end - ob_start
+    ob_start = np.where(tab['TPL EXPNO'] == 1)[0]
+    ob_end = np.roll(ob_start, -1)
+    ob_end[-1] = len(tab)
+    ob_nexp = ob_end - ob_start
 
-        datasets = []
-        for ind in ob_indices:
-            sl = slice(ob_start[ind], ob_end[ind])
-            datasets.extend(list(tab['DP.ID'][sl]))
+    if ob_indices is None:
+        ob_indices = np.where(ob_nexp >= ob_minexp)[0]
+
+    datasets = []
+    for ind in ob_indices:
+        if ind > (len(ob_start)-1):
+            print(f'Skip ob_indices={ind} (N={len(ob_start)})')
+            continue
+            
+        sl = slice(ob_start[ind], ob_end[ind])
+        datasets.extend(list(tab['DP.ID'][sl]))
             
     dirs = [root, os.path.join(root, 'RAW'), os.path.join(root, 'Processed')]
     for dir in dirs:
@@ -451,10 +455,10 @@ def redrizzle_mosaics(cat_kwargs={}, pad=60):
     vista['ra'] = vista['RAJ2000']
     vista['dec'] = vista['DEJ2000']
 
-    vista.write('vista.fits', overwrite=True)
+    vista.write('vista.ecsv', overwrite=True)
     #################
     
-    vista = utils.read_catalog('vista.fits')
+    vista = utils.read_catalog('vista.ecsv', format='ascii.ecsv')
     
     vista['ra'] = vista['RAJ2000']
     vista['dec'] = vista['DEJ2000']
