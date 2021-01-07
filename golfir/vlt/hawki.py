@@ -131,7 +131,7 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     if use_hst_radec:
         radec = hawki.make_hst_radec(root, maglim=[16,22])
         
-    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02)
+    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02, ob_minexp=ob_minexp)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
@@ -171,7 +171,7 @@ def make_hst_radec(root, maglim=[16,22]):
     return radec_file
     
     
-def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02):
+def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02):
     
     from golfir.vlt import hawki
     
@@ -200,7 +200,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, seg_file='No
             i1 = first[j+1]
         
         Ni = i1-i0
-        if Ni > 18:
+        if Ni > ob_minexp:
             print(info['OBS.ID'][i0], info['DATE-OBS'][i0], i0, i1)
             file_groups.append(info['FILE'][i0:i1].tolist())
             ob_ids.append(info['OBS.ID'][i0])
