@@ -1,5 +1,5 @@
-
-def hawki_query():
+    
+def full_hawki_query(rd=None):
     """
     Query all HAWKI observations....
     """ 
@@ -31,8 +31,16 @@ def hawki_query():
     from astropy.coordinates import SkyCoord 
     
     engine = db.get_db_engine()
-    ch = db.from_sql("SELECT field_root, field_ra as ra, field_dec as dec, log FROM charge_fields where log LIKE '%%Finish%%'", engine)
-    
+    if rd is None:
+        ch = db.from_sql("SELECT field_root, field_ra as ra, field_dec as dec, log FROM charge_fields where log LIKE '%%Finish%%'", engine)
+    else:
+        ra, dec = rd
+        ch = utils.GTable()
+        ch['ra'] = [ra]
+        ch['dec'] = [dec]
+
+        ch['field_root'] = [utils.radec_to_targname( ra=ra, dec=dec, round_arcsec=(4, 60), precision=2, targstr='j{rah}{ram}{ras}{sign}{ded}{dem}', header=None, )]
+        
     idx, dr = ch.match_to_catalog_sky(res)
     
     has_hawki = dr < 10*u.arcmin
@@ -70,41 +78,46 @@ def hawki_query():
         field = ch['field_root'][i]
 
         #tab = utils.read_catalog(f'../FieldsSummary/{field}_footprint.fits')
-        tab = utils.read_catalog(f'{field}_footprint.fits')
-        meta = tab.meta
+        if os.path.exists(f'{field}_footprint.fits'):
+            tab = utils.read_catalog(f'{field}_footprint.fits')
+            meta = tab.meta
         
-        xr = (meta['XMIN'], meta['XMAX'])
-        yr = (meta['YMIN'], meta['YMAX'])
-        ra, dec = meta['BOXRA'], meta['BOXDEC']
+            xr = (meta['XMIN'], meta['XMAX'])
+            yr = (meta['YMIN'], meta['YMAX'])
+            ra, dec = meta['BOXRA'], meta['BOXDEC']
         
-        cosd = np.cos(dec/180*np.pi)
-        dx = (xr[1]-xr[0])*cosd*60
-        dy = (yr[1]-yr[0])*60
+            cosd = np.cos(dec/180*np.pi)
+            dx = (xr[1]-xr[0])*cosd*60
+            dy = (yr[1]-yr[0])*60
 
-        box_width = np.maximum(dx, dy)
-        #query_size = np.maximum(min_size, box_width/2)/60.
+            box_width = np.maximum(dx, dy)
+            #query_size = np.maximum(min_size, box_width/2)/60.
         
-        p_hst = None
-        p_ir = None
+            p_hst = None
+            p_ir = None
         
-        for j, fph in enumerate(tab['footprint']):
-            ps, is_bad, poly = query.instrument_polygon(tab[j])
-            if not hasattr(ps, '__len__'):
-                ps = [ps]
+            for j, fph in enumerate(tab['footprint']):
+                ps, is_bad, poly = query.instrument_polygon(tab[j])
+                if not hasattr(ps, '__len__'):
+                    ps = [ps]
                 
-            for p in ps:
-                p_j = Polygon(p).buffer(0.001)
-                if p_hst is None:
-                    p_hst = p_j
-                else:
-                    p_hst = p_hst.union(p_j)
-                
-                if tab['instrument_name'][j] == 'WFC3/IR':
-                    if p_ir is None:
-                        p_ir = p_j
+                for p in ps:
+                    p_j = Polygon(p).buffer(0.001)
+                    if p_hst is None:
+                        p_hst = p_j
                     else:
-                        p_ir = p_ir.union(p_j)
-                        
+                        p_hst = p_hst.union(p_j)
+                
+                    if tab['instrument_name'][j] == 'WFC3/IR':
+                        if p_ir is None:
+                            p_ir = p_j
+                        else:
+                            p_ir = p_ir.union(p_j)
+        else:
+            cosd = np.cos(dec/180*np.pi)
+            p_hst = None
+            p_ir = None
+            
         ##############################            
         fig = plt.figure(figsize=[6,6])
         
@@ -117,7 +130,7 @@ def hawki_query():
             p = Point(res['RA'][j], res['DEC'][j]).buffer(4.1/60)
             p = affinity.scale(p, xfact=1./cosd)
             
-            #ax.add_patch(PolygonPatch(p, color='r', alpha=0.1))
+            # ax.add_patch(PolygonPatch(p, color='r', alpha=0.1))
             x, y = p.boundary.xy
             ax.plot(x, y, color=utils.MPL_COLORS['r'], alpha=0.05)
             
@@ -127,26 +140,31 @@ def hawki_query():
                 h_p = h_p.union(p)
         
         # If overlap between hawki and HST, query all exposures
-        hawki_overlap = h_p.intersection(p_hst)
-        hawki_un = h_p.union(p_hst)
+        if p_hst is not None:
+            hawki_overlap = h_p.intersection(p_hst)
+            hawki_un = h_p.union(p_hst)
                         
-        if not hasattr(p_hst, '__len__'):
-            p_hst = [p_hst]
+            if not hasattr(p_hst, '__len__'):
+                p_hst = [p_hst]
         
-        if not hasattr(h_p, '__len__'):
-            h_p = [h_p]
+            if not hasattr(h_p, '__len__'):
+                h_p = [h_p]
                                                             
-        for p in p_hst:
-            #ax.add_patch(PolygonPatch(p, color='k', alpha=0.2))
-            if not hasattr(p.boundary, '__len__'):
-                bs = [p.boundary]
-            else:
-                bs = p.boundary
+            for p in p_hst:
+                #ax.add_patch(PolygonPatch(p, color='k', alpha=0.2))
+                if not hasattr(p.boundary, '__len__'):
+                    bs = [p.boundary]
+                else:
+                    bs = p.boundary
             
-            for b in bs:
-                x, y = b.xy
-                ax.plot(x, y, color=utils.MPL_COLORS['gray'], alpha=0.3)
-        
+                for b in bs:
+                    x, y = b.xy
+                    ax.plot(x, y, color=utils.MPL_COLORS['gray'], alpha=0.3)
+        else:
+            hawki_overlap = h_p
+            if not hasattr(h_p, '__len__'):
+                h_p = [h_p]
+            
         if p_ir is not None:
             if not hasattr(p_ir, '__len__'):
                 p_ir = [p_ir]

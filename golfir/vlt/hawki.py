@@ -30,7 +30,7 @@ eso = astroquery.eso.Eso()
 if False:
     eso.login() #reenter_password=True)
 
-def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'pad':60}, fetch=True, request_id=None):
+def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'pad':60}, fetch=True, request_id=None, clean=False, sync=True):
     
     from golfir.vlt import hawki
     
@@ -57,13 +57,20 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
     
     hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id)
         
-    hawki.sync_results(include_exposures=False)
+    if sync:
+        hawki.sync_results(include_exposures=False)
     
-    if os.path.exists(f'{root}-ks_drz_sci.fits.gz'):
-        os.chdir('../')
-        os.system(f'rm -rf {root}')
+    status = os.path.exists(f'{root}-ks_drz_sci.fits.gz')
+
+    os.chdir('../')
+    
+    if status:
+        if clean:
+            os.system(f'rm -rf {root}')
+        return True
     else:
-        print('Problem?')
+        print(f'ks mosaic not found.  Problem with {root}?')
+        return False
         
 def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
     from golfir.vlt import hawki
@@ -73,7 +80,8 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
         # Configure 'username' in ~/.astropy/config
         eso.login() #reenter_password=True)
     
-    os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{root}_hawki.fits .')
+    if not os.path.exists(f'{root}_hawki.fits .'):
+        os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{root}_hawki.fits .')
     
     tab = utils.read_catalog(root+'_hawki.fits')
     
