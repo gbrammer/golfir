@@ -30,7 +30,7 @@ eso = astroquery.eso.Eso()
 if False:
     eso.login() #reenter_password=True)
 
-def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'pad':60}, fetch=True, request_id=None, clean=False, sync=True):
+def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True):
     
     from golfir.vlt import hawki
     
@@ -72,7 +72,7 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         print(f'ks mosaic not found.  Problem with {root}?')
         return False
         
-def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
+def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={'use_hst_ref':True, 'pad':60}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
     from golfir.vlt import hawki
 
     if eso is None:
@@ -328,7 +328,7 @@ def flat_gradient():
         f = np.mean(np.array(flats), axis=0)
         pyfits.writeto('flat_gradient-{0}.fits'.format(ext), data=f, overwrite=True)
         
-def redrizzle_mosaics(cat_kwargs={}, pad=60):
+def redrizzle_mosaics(cat_kwargs={}, use_hst_ref=True, pad=60):
     """
     Redrizzle mosaic with padding
     
@@ -346,8 +346,18 @@ def redrizzle_mosaics(cat_kwargs={}, pad=60):
         ref_image = f'{field}-ir_drz_sci.fits.gz'
         root = f'{field}-ks'
         
-    ref = pyfits.open(ref_image)
-    
+    if os.path.exists(ref_image) & use_hst_ref:
+        ref = pyfits.open(ref_image)
+    else:
+        files = glob.glob('Processed/*sci.fits')
+        valid_wcs = []
+        for file in files:
+            im = pyfits.open(file)
+            valid_wcs.append(pywcs.WCS(im[0].header))
+        
+        ref_hdu = utils.make_maximal_wcs(valid_wcs, pixel_scale=0.1, pad=0)
+        ref = [ref_hdu]
+        
     sh = ref[0].data.shape
     ref_header = ref[0].header.copy()
     
@@ -625,6 +635,8 @@ def redrizzle_mosaics(cat_kwargs={}, pad=60):
     a2.set_xlabel('mag_auto')
     a1.grid(); a2.grid()
     fig.tight_layout(pad=0.2)
+    
+    fig.savefig(root+'_phot.png')
     
     sci = num/den
     sci[den == 0] = 0
