@@ -59,9 +59,10 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         
     if sync:
         hawki.sync_results(include_exposures=False)
-    
-    status = os.path.exists(f'{root}-ks_drz_sci.fits.gz')
-
+        status = os.path.exists(f'{root}-ks_drz_sci.fits.gz')
+    else:
+        status = os.path.exists(f'{root}-ks_drz_sci.fits')
+        
     os.chdir('../')
     
     if status:
@@ -127,7 +128,7 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     os.chdir('../')
     
     os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
-    
+        
     if use_hst_radec:
         radec = hawki.make_hst_radec(root, maglim=[16,22])
         
