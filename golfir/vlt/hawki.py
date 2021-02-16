@@ -30,7 +30,7 @@ eso = astroquery.eso.Eso()
 if False:
     eso.login() #reenter_password=True)
 
-def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True):
+def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True, radec=None):
     
     from golfir.vlt import hawki
     
@@ -55,7 +55,7 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         request_id = None
         fetch=True
     
-    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id)
+    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, radec=radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id)
         
     if sync:
         hawki.sync_results(include_exposures=False)
