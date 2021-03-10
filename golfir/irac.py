@@ -29,7 +29,7 @@ try:
 except:
     print("(golfir.irac) Warning: failed to import grizli")
     
-def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True, global_mask=''):
+def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point', pixfrac=0.5, out_hdu=None, wcslist=None, pad=10, radec=None, aor_ids=None, use_brmsk=True, nmin=5, flat_background=False, two_pass=False, min_frametime=20, instrument='irac', run_alignment=True, assume_close=True, align_threshold=3, mips_ext='_bcd.fits', use_xbcd=False, ref_seg=None, save_state=True, med_max_size=500e6, global_mask=''):
     """
     """
     import glob
@@ -86,7 +86,8 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
             try:                
                 aors[aor].align_to_reference(reference=['GAIA','GAIA_Vizier'],
                                       radec=radec, threshold=align_threshold,
-                                      assume_close=assume_close)
+                                      assume_close=assume_close,
+                                      med_max_size=med_max_size)
             except:
                 # fp = open('{0}-{1}_wcs.failed'.format(aor, aors[aor].label),'w')
                 # fp.write(time.ctime())
@@ -131,7 +132,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
                 force_pedestal=True
                 
             print(f'drizzle_simple (iter={iter_pass}): ', i, aor, aors[aor].N)
-            aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, pixfrac=pixfrac, flat_background=flat_background, force_pedestal=force_pedestal, extra_mask=extra_mask)#'point')
+            aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, pixfrac=pixfrac, flat_background=flat_background, med_max_size=med_max_size, force_pedestal=force_pedestal, extra_mask=extra_mask)#'point')
         
         if 0:
             i0 = int(ds9.get('frame'))
@@ -224,7 +225,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
     psf_coords = (340.8852003, -9.604230278)
     for i, aor in enumerate(aors):
         print('PSF', i, aor, aors[aor].N)
-        aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, psf_coords=psf_coords, pixfrac=pixfrac)
+        aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, psf_coords=psf_coords, pixfrac=pixfrac, med_max_size=med_max_size)
         
         sci, wht, ctx, head, w = aors[aor].drz
 
@@ -549,6 +550,8 @@ class IracAOR():
                     
                 # CR in new image
                 keep = (drz[1] > 0) & ((drz[0] - med_data)*np.sqrt(drz[1]) < sigma_clip)
+                keep |= (med_n == 0) & (drz[1] > 0)
+                
                 med_data = med_data*med_n + drz[0]*keep
                 med_n += keep*1
                 med_data /= np.maximum(med_n, 1)
@@ -630,7 +633,7 @@ class IracAOR():
         hmag = 23.9-2.5*np.log10(phot['flux_auto_fix'])
         ref = phot[hmag < 22]
         
-        med_wcs, med = self.make_median_image()
+        med_wcs, med = self.make_median_image(max_size=60e6)
         
         merr = np.ones_like(med, dtype=np.float)*utils.nmad(med[med != 0])
         mcat, mseg = prep.make_SEP_catalog_from_arrays(med.byteswap().newbyteorder(), merr.byteswap().newbyteorder(), (med == 0), segmentation_map=True, threshold=1.1, wcs=med_wcs, get_background=True)
@@ -676,10 +679,10 @@ class IracAOR():
             ds9.frame(iter+3)
             ds9.view(((self.cbcd - blot_data2 - med2d)*(self.dq == 0))[j,:,:])
     
-    def drizzle_simple(self, force_pedestal=True, dq_sn=5, fmax=0.5, flat_background=False, extra_mask=None, **kwargs):
+    def drizzle_simple(self, force_pedestal=True, dq_sn=5, fmax=0.5, flat_background=False, extra_mask=None, med_max_size=60e6, **kwargs):
         
         if (not hasattr(self, 'pedestal')) | force_pedestal: 
-            med_wcs, med = self.make_median_image()        
+            med_wcs, med = self.make_median_image(max_size=med_max_size)        
             blot_data = self.blot(med_wcs, med)        
             pedestal, med2d = self.get_median(extra_mask=extra_mask)
         
@@ -804,12 +807,12 @@ class IracAOR():
         
         return sci, wht, ctx, head, w
     
-    def align_to_reference(self, reference=['GAIA','GAIA_Vizier','PS1'], radec=None, kernel='square', pixfrac=0.8, threshold=3, assume_close=True):
+    def align_to_reference(self, reference=['GAIA','GAIA_Vizier','PS1'], radec=None, kernel='square', pixfrac=0.8, threshold=3, assume_close=True, med_max_size=60e6, **kwargs):
         from grizli import prep
         import astropy.units as u
         from drizzlepac import updatehdr
         
-        res = self.drizzle_simple(dq_sn=5, fmax=0.5, driz_scale=1.0, kernel=kernel, pixfrac=pixfrac, theta=self.theta)
+        res = self.drizzle_simple(dq_sn=5, fmax=0.5, driz_scale=1.0, kernel=kernel, pixfrac=pixfrac, theta=self.theta, med_max_size=med_max_size)
         sci, wht, ctx, head, w = res
         
         pyfits.writeto('{0}-{1}_drz_sci.fits'.format(self.name, self.label), data=sci, overwrite=True, header=head)
