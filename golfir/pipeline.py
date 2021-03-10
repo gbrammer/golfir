@@ -4,6 +4,8 @@ Full script for downloading and processing CHArGE fields
 
 import os
 import glob
+import time
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
@@ -22,7 +24,11 @@ except:
     
 #from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', mips_ext='[_e]bcd.fits', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}, med_max_size=500e6, **kwargs):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', mips_ext='[_e]bcd.fits', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}, med_max_size=500e6, stop_at='', **kwargs):
+    """
+    stop_at: preprocess, make_compact
+    
+    """
     
     from grizli import utils
 
@@ -183,7 +189,10 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             if (len(files) > 0) & (SKIP): 
                 print('Skip {0}-{1}'.format(root_i, ch))
                 continue
-
+            
+            with open('{0}-{1}.log'.format(root_i, ch),'w') as fp:
+                fp.write(time.ctime())
+                
             # Do internal alignment to GAIA.  
             # Otherwise, set `radec` to the name of a file that has two columns with 
             # reference ra/dec.
@@ -308,6 +317,9 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
     fig.savefig(f'{root}.init.png')
     plt.close('all')
     
+    if stop_at == 'preprocess':
+        return True
+        
     #######
     # Make more compact individual exposures and clean directories
     wfiles = []
@@ -335,7 +347,10 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             for f in remove_files:
                 print('   rm ', f)
                 os.remove(f)
-                
+ 
+    if stop_at == 'make_compact':
+        return True
+                                   
     #############
     # Drizzle final mosaics
     # Make final mosaic a bit bigger than the HST image
