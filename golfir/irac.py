@@ -848,8 +848,8 @@ class IracAOR():
             rd = utils.read_catalog(radec)
             idx, dr = rd.match_to_catalog_sky(cat[clip])
             keep = dr.value < assume_close*25
-            prep.table_to_radec(rd[idx][keep], 'tmp.radec')
-            radec = 'tmp.radec'
+            radec = '{0}_tmp.radec'.format(self.name)
+            prep.table_to_radec(rd[idx][keep], radec)
             
         if self.instrument == 'mips':
             mag_limits = [10, 30]
@@ -864,7 +864,7 @@ class IracAOR():
         
         for i, h in enumerate(self.hdu):
             print(i, self.files[i])
-            tmpfile = 'tmp_{0}_cbcd.fits'.format(self.label)
+            tmpfile = '{0}_{1}_tmp.fits'.format(self.name, self.label)
             h[0].writeto(tmpfile, overwrite=True)
             updatehdr.updatewcs_with_shift(tmpfile, 
                         '{0}-{1}_drz_sci.fits'.format(self.name, self.label),
