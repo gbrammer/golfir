@@ -14,6 +14,8 @@ import scipy.ndimage as nd
 import scipy.spatial
 from scipy.optimize import minimize
 
+import h5py
+
 from stsci.convolve import convolve2d
 from skimage.transform import warp
 from skimage.transform import SimilarityTransform
@@ -60,7 +62,7 @@ class model_psf(object):
         
 class ImageModeler(object):
     
-    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, lsq_fitter='lstsq', **kwargs):
+    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, lsq_fitter='lstsq', conv_method='fftconvolve', **kwargs):
         self.root = root
         self.LOGFILE=f'{root}.modeler.log.txt'
         self.verbose = verbose
@@ -74,6 +76,7 @@ class ImageModeler(object):
         self.psf_only = psf_only
         
         self.lsq_fitter = lsq_fitter
+        self.conv_method = conv_method
         
         # Read High-res (Hubble) data
         self.read_hst_data(prefer_filter=prefer_filter)
@@ -108,22 +111,28 @@ class ImageModeler(object):
         self.init_psfs(**kwargs)
         
         # Component file
-        component_file = f'{self.root}-{self.lores_filter}_components.fits'
+        component_file = f'{self.root}-{self.lores_filter}_components.hdf5'
         if os.path.exists(component_file):
             grizli.utils.log_comment(self.LOGFILE, 
                    f'Read component file "{component_file}".', 
                    verbose=self.verbose, show_date=True)
                    
-            self.comp_hdu = pyfits.open(component_file)
-            self.full_mask = self.comp_hdu[0].data
+            #self.comp_hdu = pyfits.open(component_file)
+            #self.full_mask = self.comp_hdu[0].data
+            self.comp_hdu = ComponentHdf5(component_file)
+            self.full_mask = self.comp_hdu.mask.data*1
+            
         else:
             self.full_mask = np.zeros(self.lores_im.data.shape,
                                       dtype=np.uint8)
             prime = pyfits.PrimaryHDU(header=self.lores_im.header, 
                                       data=self.full_mask)
-            self.comp_hdu = pyfits.HDUList([prime])
-            self.comp_hdu[0].header['EXTNAME'] = 'MASK'
-        
+            
+            #self.comp_hdu = pyfits.HDUList([prime])
+            #self.comp_hdu[0].header['EXTNAME'] = 'MASK'
+            self.comp_hdu = ComponentHdf5(component_file)
+            self.comp_hdu.set_mask(prime)
+            
         # Model file
         model_file = f'{self.root}-{self.lores_filter}_model.fits'
         if os.path.exists(model_file):
@@ -328,12 +337,17 @@ class ImageModeler(object):
         
         # Convolved with Gaussian kernel                 
         kern = Gaussian2DKernel(smooth_size).array
-        hst_conv = convolve2d(self.hst_im[0].data-med, kern, fft=1)
+        #hst_conv = convolve2d(self.hst_im[0].data-med, kern, fft=1)
+        hst_conv = utils.convolve_helper(self.hst_im[0].data-med, kern, 
+                                         method=self.conv_method)
+                                   
         hst_var = 1/self.hst_wht[0].data
         wht_med = np.percentile(self.hst_wht[0].data[self.hst_wht[0].data > 0], 5)
         hst_var[self.hst_wht[0].data < wht_med] = 1/wht_med
-        hst_cvar = convolve2d(hst_var, kern**2, fft=1)
-
+        #hst_cvar = convolve2d(hst_var, kern**2, fft=1)
+        hst_cvar = utils.convolve_helper(hst_var, kern**2, 
+                                         method=self.conv_method)
+                                   
         xi = np.cast[int](np.round(self.phot['xpeak']))
         yi = np.cast[int](np.round(self.phot['ypeak']))
         sh = self.hst_im[0].data.shape
@@ -472,7 +486,7 @@ class ImageModeler(object):
         
         if 'PHOTFNU' in irac_im.header:
             to_ujy = irac_im.header['PHOTFNU']/1.e-6
-            print('Scale to uJy: {0:.2f}'.format(to_ujy))
+            print('Scale to uJy: {0:.4f}'.format(to_ujy))
         else:
             to_ujy = 1.
             
@@ -506,7 +520,7 @@ class ImageModeler(object):
         
         self.lores_cutout_sci = None
         
-    def init_psfs(self, window=None, **kwargs):#HanningWindow()):
+    def init_psfs(self, window=None, hst_psf_offset=[2,2], **kwargs):#HanningWindow()):
         
         ### (Restart from here after computing alignment below)
 
@@ -520,7 +534,7 @@ class ImageModeler(object):
 
         hst_psf_full = np.zeros_like(_psf)
         
-        hst_psf_offset = [2,2]
+        #hst_psf_offset = [2,2]
         hst_psf_size = self.hst_psf.shape[0]//2
         
         sh_irac = hst_psf_full.shape
@@ -655,9 +669,10 @@ class ImageModeler(object):
             psf_kernel = create_matching_kernel(self.hst_psf_full,
                                    lores_psf, window=self.psf_window)
         
+        # Use stsci convolver
         b_conv = convolve2d(border, psf_kernel, mode='constant', fft=1,
                             cval=1)
-                                     
+                                                                     
         #self.patch_border = b_conv[::self.pf, ::self.pf].flatten()
         self.patch_border = utils.resample_array(b_conv, 
                                wht=None, pixratio=self.pf, 
@@ -818,9 +833,12 @@ class ImageModeler(object):
                 psf_kernel = create_matching_kernel(self.hst_psf_full,
                                        lores_psf, window=self.psf_window)
 
-            _Ai = convolve2d(hst_slice*(self.patch_seg == id), psf_kernel,
-                              mode='constant', fft=1, cval=0.0)
-                              
+            #_Ai = convolve2d(hst_slice*(self.patch_seg == id), psf_kernel,
+            #                  mode='constant', fft=1, cval=0.0)
+            _Ai = utils.convolve_helper(hst_slice*(self.patch_seg == id),
+                                        psf_kernel, method=self.conv_method, 
+                                        cval=0.0)                 
+                                        
             # Reshaped
             _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
                                    slice_if_int=True, int_tol=1.e-3, 
@@ -893,9 +911,11 @@ class ImageModeler(object):
                                    lores_psf, window=self.psf_window)
         
                                    
-        _Ai = convolve2d(my_slice, psf_kernel,
-                          mode='constant', fft=1, cval=0.0)
-                          
+        #_Ai = convolve2d(my_slice, psf_kernel,
+        #                  mode='constant', fft=1, cval=0.0)
+        _Ai = utils.convolve_helper(my_slice, psf_kernel, 
+                                    method=self.conv_method, cval=0.0)
+                                                      
         # Reshaped
         _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
                                slice_if_int=True, int_tol=1.e-3, 
@@ -1002,10 +1022,13 @@ class ImageModeler(object):
         """
         Put a stored component into the patch coordinates
         """    
-        ext = ('MODEL',id)
-        if ext not in self.comp_hdu:
+        #ext = ('MODEL',id)
+        #if ext not in self.comp_hdu:
+        #    return None
+        ext = id
+        if not self.comp_hdu.has_id(id):
             return None
-        
+            
         hdu = self.comp_hdu[ext]
         if full_image:
             patch = np.zeros(self.lores_shape, dtype=np.float32)
@@ -1327,7 +1350,10 @@ class ImageModeler(object):
                 print('Use component {0} for {1}'.format(component_type.name, id_i))
             elif hasattr(component_type, '__len__'):
                 print('Use component {0} ({1}) for {2}'.format(component_type[i].name, component_type[i].pdict, id_i))
-                components += [component_type[i]]
+                if hasattr(component_type, '__len__'):
+                    components += component_type[i]
+                else:
+                    components += [component_type[i]]
             else:
                 keys = {'q':0.8}
                 if match_geometry:
@@ -1373,8 +1399,9 @@ class ImageModeler(object):
                 continue
                
             xy = self.lores_xy[ix,:][0] - self.patch_ll + 0.5
-            components[-1].pdict['pos'] = list(xy)
-            components[-1].pdict['mag'] = 22.5
+            for i in range(fit_sky*1, len(components)):
+                components[i].pdict['pos'] = list(xy)
+                components[i].pdict['mag'] = 22.5
 
             if (id_i in self.patch_ids) & True:
                 fclip = np.maximum(initial_fluxes[self.patch_ids == id_i], 1)
@@ -1623,7 +1650,7 @@ class ImageModeler(object):
         """
         Model image with fully separate component layers
         """
-        component_file = f'{self.root}-{self.lores_filter}_components.fits'
+        component_file = f'{self.root}-{self.lores_filter}_components.hdf5'
         # if os.path.exists(comp_file):
         #     comp_hdu = pyfits.open(comp_file)
         #     full_mask = comp_hdu[0].data
@@ -1640,16 +1667,21 @@ class ImageModeler(object):
         # Slices for subcomponent models
         yp, xp = np.indices(self.patch_shape)
         flux = self.patch_obj_coeffs*1
-
+        
+        self.comp_hdu.open(mode='a')
+        
         for i, id in tqdm(enumerate(self.patch_ids)):
-            extn = 'MODEL',id
-            if (extn in self.comp_hdu):
-                if skip_existing:
-                    print(f'Extension ({extn}) exists, skip.')
-                    continue
-                else:
-                    self.comp_hdu.pop(extn)
-                
+            #extn = 'MODEL',id
+            #if (extn in self.comp_hdu):
+            #    if skip_existing:
+            #        print(f'Extension ({extn}) exists, skip.')
+            #        continue
+            #    else:
+            #        self.comp_hdu.pop(extn)
+            if self.comp_hdu.has_id(id) & skip_existing:
+                print(f'Extension ({id}) exists, skip.')
+                continue    
+                               
             ix = self.patch_ids == id
             _Ai = self._A[ix,:].reshape(self.patch_shape)
 
@@ -1708,13 +1740,16 @@ class ImageModeler(object):
                         pk = 'GF_{0}_F'.format(p)
                         hdu_i.header[pk] = (params[p][1], 'Starred parameter')
                         
-            if ('MODEL',id) in self.comp_hdu:
-                self.comp_hdu[extn] = hdu_i
-            else:
-                self.comp_hdu.append(hdu_i)
-
-        self.comp_hdu.writeto(component_file, overwrite=True)
-                
+            #if ('MODEL',id) in self.comp_hdu:
+            #    self.comp_hdu[extn] = hdu_i
+            #else:
+            #    self.comp_hdu.append(hdu_i)
+            self.comp_hdu.set_model(hdu_i, force=True, verbose=False, 
+                                    close_file=False)
+            
+        #self.comp_hdu.writeto(component_file, overwrite=True)
+        self.comp_hdu.open(mode='r')
+               
 
     def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_niter=1, galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, align_type=3, **kwargs):
         """
@@ -1855,7 +1890,7 @@ class ImageModeler(object):
         self.save_patch_results()
         return True
         
-    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f160w','f140w', 'f125w', 'f110w'], **kwargs):
+    def generate_patches(self, patch_arcmin=1.0, patch_overlap=0.2, check_filters=['f160w','f140w', 'f125w', 'f110w'], extra=None, pad=None, **kwargs):
         """
         Generate patches to tile the field
         """
@@ -1863,8 +1898,12 @@ class ImageModeler(object):
         pixel_scale = self.lores_wcs.pscale
         
         size =  patch_arcmin*60/pixel_scale
-        pad = 1.02*size
-        extra = 10./pixel_scale # extra padding, arcsec
+        if pad is None:
+            pad = 1.02*size
+        
+        if extra is None:
+            extra = 10./pixel_scale # extra padding, arcsec
+            
         step = (2*patch_arcmin-patch_overlap)*60/pixel_scale
         
         valid = np.zeros(len(self.phot['mag_auto']), dtype=bool)
@@ -2391,4 +2430,178 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
                 from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
                 
     return models
+
+
+class DatasetLikeHDU(object):
+    def __init__(self, dataset):
+        self.dataset = dataset
     
+    @property 
+    def header(self):
+        keys = list(self.dataset.attrs.keys())
+        h = {}
+        for k in keys:
+            h[k] = self.dataset.attrs[k]
+    
+        return h
+    
+    @property
+    def data(self):
+        return self.dataset[()]
+    
+def dataset_from_hdu(h5, name, hdu, compression=None, force=True, dtype=None):
+    """
+    Create a dataset in a `h5` object from a FITS HDU
+    """
+    if (name in h5):
+        if force:
+            h5.pop(name)
+        else:
+            print(f'{name} already in h5 object')
+            return h5[name]
+        
+    if dtype is None:
+        dset = h5.create_dataset(name, data=hdu.data, compression=compression)
+    else:
+        dset = h5.create_dataset(name, data=hdu.data.astype(dtype), compression=compression)
+        
+    for k in hdu.header:
+        if k == 'COMMENT':
+            continue
+            
+        try:
+            dset.attrs[k] = hdu.header[k]
+        except:
+            print(f'Failed to set keyword `{k}`')
+    
+    return dset
+
+class ComponentHdf5(object):
+    """
+    Container for Golfir model components
+    
+    Has 'mask' dataset and 'models' group with the object models.
+    
+    """
+    def __init__(self, file='cos21-08.09-100mas-hsci_components.hdf5', initialize=True):
+        self.file = file
+        self.fp = None
+        
+        if initialize:
+            self.init()
+            
+        self.open()
+    
+    def init(self, mode='a', force=False):
+        """
+        Initialize file with models group
+        """
+            
+        self.open(mode=mode)
+        if 'models' in self.fp:
+            if not force:
+                self.fp.close()
+                return True
+            
+            self.fp.pop('models')
+    
+        print(f'Initialize \'models\' in {self.file}')
+        grp = self.fp.create_group('models')
+        self.fp.close()
+        
+    def set_mask(self, mask_hdu, compression='gzip'):
+        """
+        Set mask dataset from FITS HDU
+        """
+    
+        self.open(mode='a')
+        
+        if 'mask' in self.fp:
+            self.fp.pop('mask')
+
+        dset = dataset_from_hdu(self.fp, 'mask', mask_hdu, dtype=np.uint8, compression='gzip')
+        #self.fp.create_dataset("mask", data=mask_hdu, compression=compression)
+        #for k in mask_hdu.header:
+        #    dset.attrs[k] = mask_hdu.header[k]
+        
+        self.fp.close()
+        
+        self.open(mode='r')
+        
+    def open(self, mode='r'):
+        """
+        Open the file with mode ``mode``.
+        """
+        try:
+            self.fp.close()
+        except:
+            pass
+        
+        if os.path.exists(self.file):
+            self.fp = h5py.File(self.file, mode)
+        else:
+            self.fp = h5py.File(self.file, 'w')
+    
+    def __delete__(self):
+        if hasattr(self.fp, 'mode'):
+            print('Delete: close h5py object')
+            self.fp.close()
+            
+    @property 
+    def mask(self):
+        return DatasetLikeHDU(self.fp['mask'])
+    
+    def has_id(self, objid):
+        key = f'/models/{objid}'
+        return key in self.fp
+    
+    def __getitem__(self, objid):        
+        import h5py
+        key = f'/models/{objid}'
+        
+        if self.has_id(objid):
+            return DatasetLikeHDU(self.fp[key])
+        else:
+            print(f'Object {objid} not found in /models/')
+            return None
+    
+    def set_model(self, hdu, force=False, close_file=True, verbose=True, dtype=np.float32):
+        """
+        Set model/id dataset from an HDU object
+        """
+        if hdu.header['EXTNAME'] != 'MODEL':
+            if verbose:
+                print('set_model: hdu.header["EXTNAME"] must be "MODEL"')
+            
+            return False
+        
+        if self.fp.mode.startswith('r'):
+            self.fp.close()
+            self.open(mode='a')
+            
+        id_i = hdu.header['EXTVER']
+        grp = self.fp['models']
+        
+        key = f'{id_i}'
+        if key in grp:
+            if force:
+                if verbose:
+                    print(f'Pop {key} from {self.file}')
+                    grp.pop(key)
+            else:
+                if verbose:
+                    print(f'{key} found in {self.file}')
+                
+                return grp[key]
+        else:
+            if verbose:
+                print(f'Set models/{key} in {self.file}')
+            
+        dataset_from_hdu(grp, key, hdu, dtype=np.float32, compression=None)
+                
+        if close_file:
+            self.fp.close()
+            self.open(mode='r')
+            grp = self.fp['models']
+
+        return grp[key]

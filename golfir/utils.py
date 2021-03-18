@@ -1695,6 +1695,56 @@ def recenter_psfs():
     print(xca, yca, pash)
     print(xci, yci, pish)
 
+def convolve_helper(data, kernel, method='fftconvolve', fill_scipy=False, cval=0.0):
+    """
+    Handle 2D convolution methods
+    
+    Parameters
+    ==========
+    
+    method: str
+        
+        'fftcoonvolve':``scipy.signal.fftconvolve(data, kernel, mode='same')``
+
+        'oaconvolve':``scipy.signal.oaconvolve(data, kernel, mode='same')``
+    
+        'stsci':``stsci.convolve.convolve2d(data, kernel, fft=1, mode='constant', cval=cval)``
+     
+    If ``fill_scipy=True`` or ``method='stsci'``, the ``data`` array will be 
+    expanded to include the kernel size and padded with values given by 
+    ``cval``.
+    
+    """
+    if method in ['oaconvolve', 'fftconvolve']:
+        from scipy.signal import fftconvolve, oaconvolve
+        
+        if method == 'fftconvolve':
+            convolve_func = fftconvolve
+        else:
+            convolve_func = oaconvolve
+        
+        if fill_scipy:
+            sh = data.shape
+            shk = kernel.shape
+            _data = np.zeros((sh[0]+2*shk[0], sh[1]+2*shk[1]))+cval
+            _data[shk[0]:-shk[0], shk[1]:-shk[1]] = data
+        else:
+            _data = data
+            
+        conv = convolve_func(_data, kernel, mode='same')
+        if fill_scipy:
+            conv = conv[shk[0]:-shk[0], shk[1]:-shk[1]]
+        
+    elif method == 'stsci':
+        from stsci.convolve import convolve2d
+        conv = convolve2d(data, kernel, mode='constant', cval=cval, fft=1)
+    
+    else:
+        raise ValueError("Valid options for `method` are 'fftconvolve',"
+                         "'oaconvolve', and 'stsci'.")
+    
+    return conv
+
 
 def argv_to_dict(argv, defaults={}, dot_dict=True):
     """

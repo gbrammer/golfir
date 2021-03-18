@@ -26,7 +26,8 @@ if True:
          'matplotlib>=3.0',
          'tqdm>=4.0',
          'stsci.convolve',
-         'scikit-image']
+         'scikit-image',
+         'h5py']
          
 else:
     install_requires = []    
