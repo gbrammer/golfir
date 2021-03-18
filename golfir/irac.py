@@ -1427,7 +1427,8 @@ class MixturePSF(object):
         Return a combined list of all `self.mogs` parameteres.
         """
         return np.hstack([np.array(m.getParams())[self.indices] for m in self.mogs])
-
+    
+    
     def get_matrix(self, pos, coeffs=None):
         """
         Evaluatee `self.mogs` at `pos` positions and return a matrix 
@@ -1439,6 +1440,7 @@ class MixturePSF(object):
             return _mog2.dot(coeffs)            
         else:
             return _mog2
+
 
     def set_pixelgrid(self, size=32, instep=0.168, outstep=0.2, oversample=2):
         """
@@ -1454,6 +1456,7 @@ class MixturePSF(object):
         self.shape = xp.shape
         self.oversample = oversample
         self.pos = np.array([xp.flatten(), yp.flatten()]).T 
+
 
     def evaluate_psf(self, transform=None, normalize=True, **kwargs):
         """
@@ -1476,6 +1479,7 @@ class MixturePSF(object):
             psf /= psf.sum()
 
         return psf, 1., 1.
+
 
     @property 
     def centroid(self):
@@ -1596,6 +1600,48 @@ class MixturePSF(object):
                 ax.set_yticklabels([])
 
             fig.tight_layout(pad=0.1)
+
+
+    def to_header(self):
+        """
+        Parameters as FITS header
+        """
+        h = pyfits.Header()
+
+        pars = self.getParams()
+        
+        h['PSFN'] = (self.N, 'MixturePSF N components')
+        for i in range(self.N):
+            h[f'PSFC{i}'] = self.coeffs[i]
+            pars = self.mogs[i].getParams()
+            for j in range(6):
+                h[f'PSFP{i}_{j}'] = pars[j]
+
+        h['OPSCALE'] = self.orig_pixscale, 'Original pixel scale'
+        return h
+
+
+    @staticmethod
+    def from_header(header, initial_size=32, hires_pscale=0.1):
+        """
+        Initialize from parameters in a `~astropy.io.fits.Header`
+        """
+        psf_obj = MixturePSF(N=header['PSFN']) 
+        
+        for i in range(psf_obj.N):
+            psf_obj.coeffs[i] = header[f'PSFC{i}']
+            pars = [header[f'PSFP{i}_{j}'] for j in range(6)]
+            psf_obj.mogs[i].setParams(pars)
+        
+        orig_pix = header['OPSCALE']
+        if hires_pscale is None:
+            hires_pscale = orig_pix
+            
+        psf_obj.set_pixelgrid(size=initial_size, instep=orig_pix,
+                              outstep=orig_pix, 
+                              oversample=orig_pix/hires_pscale)
+        return psf_obj
+
 
     @staticmethod        
     def _objmog(theta, mixpsf, cutout, mask, pos, lsq, verbose, ret):
