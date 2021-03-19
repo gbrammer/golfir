@@ -214,7 +214,7 @@ class ImageModeler(object):
         os.system('gunzip -f *drz*fits.gz *seg.fits.gz')
         
         # Need ACS?
-        wfc_files = glob.glob('j*-f1*sci.fits')
+        wfc_files = glob.glob('j*-f1*sci.fits*')
         if len(wfc_files) == 0:
             os.system(f'aws s3 sync s3://{BUCKET}/Pipeline/{root}/Prep/ ./'
                        ' --exclude "*"'
@@ -230,12 +230,12 @@ class ImageModeler(object):
         Read HST data
         """
         
-        ref_files = glob.glob(f'{self.root}-{prefer_filter}*_dr?_sci.fits')
+        ref_files = glob.glob(f'{self.root}-{prefer_filter}*_dr?_sci.fits*')
         
         if len(ref_files) == 0:
-            ref_files = glob.glob('{0}-f1*_drz_sci.fits'.format(self.root))
+            ref_files = glob.glob('{0}-f1*_drz_sci.fits*'.format(self.root))
             if len(ref_files) == 0:
-                ref_files = glob.glob(f'{self.root}-ir*_dr*_sci.fits')
+                ref_files = glob.glob(f'{self.root}-ir*_dr*_sci.fits*')
                 
             ref_files.sort()
             ref_file = ref_files[-1]
@@ -364,11 +364,12 @@ class ImageModeler(object):
         
         self.waterseg = waterseg
         
-    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, **kwargs):
+    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, shift_irsa_psf=[-1.520, -1.741], grow_irsa_psf=None, **kwargs):
         """
         Read low-res (e.g., IRAC)
         """
         from golfir import irac
+        import scipy.ndimage as nd
         
         self.use_avg_psf = use_avg_psf
         
@@ -397,15 +398,29 @@ class ImageModeler(object):
                                     f'data/psf/irsa_0.1pix_{filter}_psf.fits')
             
             avg_psf = pyfits.open(psf_file)[0].data
-            
-            # Recenter
-            if (filter == 'ch1') & ('irsa' in psf_file):
-                avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
-            
             grizli.utils.log_comment(self.LOGFILE, 
                    f'Read avg psf: {psf_file}\n',
                    verbose=self.verbose, show_date=True)
-                   
+            
+            # Recenter
+            if ((filter == 'ch1') & ('irsa' in psf_file) & 
+                (shift_irsa_psf is not None)):
+                cmt = f'Shift {os.path.basename(psf_file)}: {shift_irsa_psf}'
+                grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
+                       verbose=self.verbose, show_date=True)
+                       
+                #avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
+                avg_psf = irac.warp_image(np.array(shift_irsa_psf),
+                                          avg_psf*1.)
+                
+                if grow_irsa_psf is not None:
+                    cmt = f'Grow {os.path.basename(psf_file)}: {grow_irsa_psf}'
+                    grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
+                           verbose=self.verbose, show_date=True)
+
+                    #avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
+                    avg_psf = nd.gaussian_filter(avg_psf, grow_irsa_psf*1)
+                                   
             self.avg_psf_file = psf_file
         else:
             avg_psf = None
@@ -743,7 +758,7 @@ class ImageModeler(object):
         self._Abg = np.array(_Abg)
         self.Nbg = self._Abg.shape[0]
         
-    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', id_list=None, **kwargs):
+    def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', id_list=None, individual_psf=True, psf_kernel=None, kernel_correction=0, **kwargs):
         """
         Compute hst-to-IRAC components for objects in the patch
         """
@@ -801,6 +816,23 @@ class ImageModeler(object):
         xy_offset = xy_warp - patch_xy
                     
         _A = []
+        #psf_kernel = None
+        
+        if not individual_psf:
+            _ = self.lores_psf_obj.evaluate_psf(ra=self.patch_rd[0], 
+                                                dec=self.patch_rd[1], 
+                                          min_count=0, 
+                                          clip_negative=True, 
+                                          transform=xy_offset[0])
+
+            lores_psf, psf_exptime, psf_count = _                              
+            if (self.psf_window is -1) | (self.psf_only):
+                psf_kernel = lores_psf
+            else:
+                #print('WINDOW {0}'.format(self.psf_window))
+                psf_kernel = create_matching_kernel(self.hst_psf_full,
+                                       lores_psf, window=self.psf_window)
+                        
         for i, id in tqdm(enumerate(ids)):
             #print(i, id)
             ix = phot['number'] == id
@@ -810,36 +842,29 @@ class ImageModeler(object):
                 if _Ai is not None:
                     _A.append(_Ai)
                     continue
-                    
-            # if mx is not None:
-            #     rx_i = mx(phot['ra'][ix]-m0[0], phot['dec'][ix]-m0[1])
-            #     ry_i = my(phot['ra'][ix]-m0[0], phot['dec'][ix]-m0[1])
-            #     tf = np.array([rx_i, ry_i]) #{'translation':(rx_i, ry_i)}
-            # 
-            # else:
-            #     #tf = {'translation':(rx, ry)}
-            #     tf = None
             
-            _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
+            # Evalutate PSF        
+            if individual_psf | (psf_kernel is None):
+                _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
                                           dec=phot['dec'][ix][0], min_count=0, 
                                           clip_negative=True, 
                                           transform=xy_offset[i])
 
-            lores_psf, psf_exptime, psf_count = _                              
-            if (self.psf_window is -1) | (self.psf_only):
-                psf_kernel = lores_psf
-            else:
-                #print('WINDOW {0}'.format(self.psf_window))
-                psf_kernel = create_matching_kernel(self.hst_psf_full,
-                                       lores_psf, window=self.psf_window)
-
-            #_Ai = convolve2d(hst_slice*(self.patch_seg == id), psf_kernel,
-            #                  mode='constant', fft=1, cval=0.0)
+                lores_psf, psf_exptime, psf_count = _                              
+                if (self.psf_window is -1) | (self.psf_only):
+                    psf_kernel = lores_psf
+                else:
+                    #print('WINDOW {0}'.format(self.psf_window))
+                    psf_kernel = create_matching_kernel(self.hst_psf_full,
+                                           lores_psf, window=self.psf_window)
+            
+            # Convolve HST image with psf kernel
             _Ai = utils.convolve_helper(hst_slice*(self.patch_seg == id),
-                                        psf_kernel, method=self.conv_method, 
+                                        psf_kernel+kernel_correction,
+                                        method=self.conv_method, 
                                         cval=0.0)                 
                                         
-            # Reshaped
+            # Reshape into lores grid
             _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
                                    slice_if_int=True, int_tol=1.e-3, 
                                    method=resample_method, 
@@ -1399,9 +1424,9 @@ class ImageModeler(object):
                 continue
                
             xy = self.lores_xy[ix,:][0] - self.patch_ll + 0.5
-            for i in range(fit_sky*1, len(components)):
-                components[i].pdict['pos'] = list(xy)
-                components[i].pdict['mag'] = 22.5
+            #for i in range(fit_sky*1, len(components)):
+            components[-1].pdict['pos'] = list(xy)
+            components[-1].pdict['mag'] = 22.5
 
             if (id_i in self.patch_ids) & True:
                 fclip = np.maximum(initial_fluxes[self.patch_ids == id_i], 1)
