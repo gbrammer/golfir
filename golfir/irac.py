@@ -1015,8 +1015,14 @@ def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0
         has_gaia = dr < 1*u.arcsec
         dd = gaia['dec'][idx] - cat['dec']
         dr = gaia['ra'][idx] - cat['ra']
+        has_gaia &= np.isfinite(dd) & (np.isfinite(dr))
+        
         cat['rax'] = cat['ra'] + np.median(dr[has_gaia])
         cat['decx'] = cat['dec'] + np.median(dd[has_gaia])
+        
+        clip = np.isfinite(cat['rax']+cat['decx'])
+        cat = cat[clip]
+        
         idx, dr = gaia.match_to_catalog_sky(cat, other_radec=('rax', 'decx'))
         has_gaia = (dr < 0.4*u.arcsec) & (cat['mag_auto'] > 16) & (cat['mag_auto'] < 20) & (cat['mask_aper_10'] < 3) & (cat['flux_radius'] < 2.5*0.5/pix)
 

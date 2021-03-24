@@ -24,7 +24,7 @@ except:
     
 #from grizli import utils
 
-def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', mips_ext='[_e]bcd.fits', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}, med_max_size=500e6, stop_at='', **kwargs):
+def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kernel='square', initial_pix=1.0, final_pix=0.5, pulldown_mag=15.2, sync_xbcd=True, skip_fetch=False, radec=None, mosaic_pad=2.5, drizzle_ref_file='', run_alignment=True, assume_close=True, bucket='grizli-v1', aor_query='r*', mips_ext='[_e]bcd.fits', channels=['ch1','ch2','ch3','ch4','mips1'], drz_query='r*', sync_results=True, ref_seg=None, min_frame={'irac':5, 'mips':1.0}, med_max_size=500e6, stop_at='', make_psf=True, **kwargs):
     """
     stop_at: preprocess, make_compact
     
@@ -210,7 +210,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             # PSFs
             plt.ioff()
 
-            if instrument != 'mips':
+            if (instrument != 'mips') & make_psf:
                 ch_num = int(ch[-1])
                 segmask=True
 
@@ -234,7 +234,7 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
                 os.system('gzip {0}*-{1}_drz*fits'.format(root_i, ch))
         
         # PSFs
-        if instrument != 'mips':
+        if (instrument != 'mips') & make_psf:
             # Average PSF
             p = 0.1
             files = glob.glob('*{0}-{1:.1f}*psfr.fits'.format(ch, p))
