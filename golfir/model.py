@@ -364,7 +364,7 @@ class ImageModeler(object):
         
         self.waterseg = waterseg
         
-    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, shift_irsa_psf=[-1.520, -1.741], grow_irsa_psf=None, **kwargs):
+    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, shift_irsa_psf='auto', grow_irsa_psf=None, **kwargs):
         """
         Read low-res (e.g., IRAC)
         """
@@ -403,8 +403,15 @@ class ImageModeler(object):
                    verbose=self.verbose, show_date=True)
             
             # Recenter
-            if ((filter == 'ch1') & ('irsa' in psf_file) & 
-                (shift_irsa_psf is not None)):
+            if ('irsa' in psf_file) & (shift_irsa_psf is not None):
+                if shift_irsa_psf in ['auto']:
+                    if filter == 'ch1':
+                        shift_irsa_psf = [-1.520, -1.741]
+                    elif filter == 'ch2':
+                        shift_irsa_psf = [-1.357, -1.686]
+                    else:
+                        shift_isra_psf = [-1.292, -0.806]
+                        
                 cmt = f'Shift {os.path.basename(psf_file)}: {shift_irsa_psf}'
                 grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
                        verbose=self.verbose, show_date=True)
