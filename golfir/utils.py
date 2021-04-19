@@ -585,17 +585,29 @@ def convolve_helper(data, kernel, method='fftconvolve', fill_scipy=False, cval=0
     
     method: str
         
-        'fftcoonvolve':``scipy.signal.fftconvolve(data, kernel, mode='same')``
+        'fftconvolve':``scipy.signal.fftconvolve(data, kernel, mode='same')``
 
         'oaconvolve':``scipy.signal.oaconvolve(data, kernel, mode='same')``
     
         'stsci':``stsci.convolve.convolve2d(data, kernel, fft=1, mode='constant', cval=cval)``
+        
+        'xstsci': Try ``stsci`` but fall back to ``fftconvolve`` if failed to 
+        `import stsci.convolve`.
      
     If ``fill_scipy=True`` or ``method='stsci'``, the ``data`` array will be 
     expanded to include the kernel size and padded with values given by 
     ``cval``.
     
     """
+    
+    if method == 'xstsci':
+        try:
+            from stsci.convolve import convolve2d
+            method = 'stsci'
+        except:
+            print('import stsci.convolve failed.  Fall back to fftconvolve.')
+            method = 'fftconvolve'
+            
     if method in ['oaconvolve', 'fftconvolve']:
         from scipy.signal import fftconvolve, oaconvolve
         
@@ -622,7 +634,7 @@ def convolve_helper(data, kernel, method='fftconvolve', fill_scipy=False, cval=0
     
     else:
         raise ValueError("Valid options for `method` are 'fftconvolve',"
-                         "'oaconvolve', and 'stsci'.")
+                         "'oaconvolve', 'stsci' ('xstsci').")
     
     return conv
 

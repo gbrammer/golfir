@@ -16,7 +16,7 @@ from scipy.optimize import minimize
 
 import h5py
 
-from stsci.convolve import convolve2d
+#from stsci.convolve import convolve2d
 from skimage.transform import warp
 from skimage.transform import SimilarityTransform
 from skimage.morphology import dilation
@@ -650,8 +650,11 @@ class ImageModeler(object):
                                    lores_psf, window=self.psf_window)
         
         # Use stsci convolver
-        b_conv = convolve2d(border, psf_kernel, mode='constant', fft=1,
-                            cval=1)
+        #b_conv = convolve2d(border, psf_kernel, mode='constant', fft=1,
+        #                    cval=1)
+    
+        b_conv = utils.convolve_helper(border, psf_kernel, fill_scipy=True,
+                                       method='xstsci', cval=1)                 
                                                                      
         #self.patch_border = b_conv[::self.pf, ::self.pf].flatten()
         self.patch_border = utils.resample_array(b_conv, 

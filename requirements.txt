@@ -8,5 +8,4 @@ photutils >= 0.7.0
 lxml >= 3.8.0
 tqdm >= 4.0
 h5py
-stsci.convolve
 scikit-image
