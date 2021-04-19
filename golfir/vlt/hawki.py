@@ -676,7 +676,8 @@ def get_ob_root(h0):
     ob_root = 'ob{0}-{1}'.format(h0['HIERARCH ESO OBS ID'], h0['DATE-OBS'][:-5].replace('-','').replace(':','').replace('T','-'))
     
     return ob_root
-    
+
+
 def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02):
     """
     Reduce a HAWKI chip
@@ -688,8 +689,6 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
     gain = pyfits.open('RAW/M.HAWKI.2019-10-22T08_04_11.606.fits')
     dark = pyfits.open('RAW/M.HAWKI.2019-10-24T07_34_33.323.fits')
     
-    #ob_root = 'ob{0}-{1}'.format(h0['HIERARCH ESO OBS ID'], h0['HIERARCH ESO TPL START'].replace('-','').replace(':','').replace('T','-'))
-    #ob_root = 'ob{0}-{1}'.format(h0['HIERARCH ESO OBS ID'], h0['DATE-OBS'][:-5].replace('-','').replace(':','').replace('T','-'))
     ob_root = get_ob_root(sci_files[0])
     
     fp = open(ob_root+'.files','w')
@@ -719,11 +718,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
 #    """
 
     utils.log_comment(None, msg, verbose=True, show_date=True)
-    
-    # ps1 = prep.get_panstarrs_catalog(ra=34.26687364, dec=-5.006135381, radius=5) 
-    # prep.table_to_radec(ps1, 'panstarrs.radec')
-    # prep.table_to_regions(ps1, 'panstarrs.reg')
-        
+
     #################
     msg = '{0}-{1}: Read data, {2} files'.format(ob_root, ext, NFILES)
     utils.log_comment(LOGFILE, msg, verbose=True, show_date=True, mode='a')
@@ -741,31 +736,28 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
     py = py.flatten()
     
     pyn, pxn = (np.indices(sh)-1024)/1024
-        
+    
     ######### Background model
-    try:
-        _xx = _A # undefined
-    except:
-        if True:
-            # Hermite polynomials for background
-            _A = []
-            horder = bkg_order
-            from numpy.polynomial.hermite import hermgrid2d
-            xa = np.linspace(-1,1,2048)
-            ct = 0
-            for i in range(horder):
-                for j in range(horder):
-                    c = np.zeros((horder,horder))
-                    c[i,j] = 1
-                    herm = hermgrid2d(xa, xa, c)
-                    #ds9.frame(7+ct)
-                    #ds9.view(herm)
-                    ct+=1
-                    _A.append(herm.flatten())
-        
-            _A = np.array(_A)
-        else:
-            _A = np.array([py.flatten()*0+1, pxn.flatten(), pyn.flatten()])
+    if True:
+        # Hermite polynomials for background
+        _A = []
+        horder = bkg_order
+        from numpy.polynomial.hermite import hermgrid2d
+        xa = np.linspace(-1,1,2048)
+        ct = 0
+        for i in range(horder):
+            for j in range(horder):
+                c = np.zeros((horder,horder))
+                c[i,j] = 1
+                herm = hermgrid2d(xa, xa, c)
+                #ds9.frame(7+ct)
+                #ds9.view(herm)
+                ct+=1
+                _A.append(herm.flatten())
+    
+        _A = np.array(_A)
+    else:
+        _A = np.array([py.flatten()*0+1, pxn.flatten(), pyn.flatten()])
                 
     dq = (px > 100) & (py > 100) & (px < 2048-100) & (py < 2048-100)
         
@@ -977,7 +969,8 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
     
     use_exposures = True
     ransac = True
-
+    cat = None
+    
     ############################
     for align_iter in range(2):
         off = 1024
@@ -1015,6 +1008,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
                 V1 = V1[clip,:]- np.array([xoff, yoff])
         
             else:
+                # cat is derived from the global stack in second iteration
                 align_type = f'ext ({radec})'
                 # ref_ra = ps1['ra']
                 # ref_dec = ps1['dec']
@@ -1174,35 +1168,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
             triangle_size = [10,3700]
         else:
             triangle_size = [5,200]
-        
-        if False:
-
-            rad_rd = np.array([radec_tab['X_WORLD'], radec_tab['Y_WORLD']]).T[rclip]
-            cat_rd = np.array([cat['X_WORLD'], cat['Y_WORLD']]).T
-
-            cat_xy = np.array([cat['X_IMAGE'], cat['Y_IMAGE']]).T
-
-            x0 = np.median(rad_rd, axis=0)
-            cosd = np.array([np.cos(x0[1]/180*np.pi), 1])
-
-            V1 = (cat_rd - x0)*cosd*3600
-            V2 = (rad_rd - x0)*cosd*3600
-            
-            # PIxels
-            x0 = drz_wcs.wcs.crpix
-            V1 = (cat_xy - x0)
-            V2 = np.array(drz_wcs.all_world2pix(rad_rd, pix_origin)) - x0
-            
-            maxKeep = 4
-            auto = 5
-            
-            #pair_ix = match.match_catalog_tri(input, output, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
-            
-            pair_ix = match.match_catalog_tri(V1, V2, maxKeep=maxKeep, auto_keep=auto, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=triangle_size, auto_limit=5)#, ignore_rot=True, ignore_scale=True, ba_max=0.98, size_limit=[1,1000])
-            
-            from skimage.transform import SimilarityTransform
-            tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=SimilarityTransform, use_ransac=True)
-                
+                        
         _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, clip=-120, simple=False, NITER=3, mag_limits=[6, 23], triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False)
         
         ######### Object masking
@@ -1371,7 +1337,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
     
         cat = prep.make_SEP_catalog('{0}-{1}-ks'.format(ob_root, ext), threshold=2, column_case=str.upper)
         
-        # Now use pointing catalog
+        # Now use pointing catalog for second iteration
         use_exposures = False
                             
     # Save processed exposures

@@ -1,0 +1,12 @@
+# python == 3.6.10
+numpy >= 1.19
+scipy >= 1.5.0
+matplotlib >= 3.2
+astropy >= 4.0
+astroquery >= 0.4.0
+photutils >= 0.7.0
+lxml >= 3.8.0
+tqdm >= 4.0
+h5py
+stsci.convolve
+scikit-image

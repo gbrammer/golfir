@@ -3,7 +3,18 @@ def full_hawki_query(rd=None):
     """
     Query all HAWKI observations....
     """ 
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    from shapely.geometry import Polygon, Point
+    from descartes import PolygonPatch
+    from shapely import affinity 
+    
     import astroquery.eso
+    from grizli import utils
+    from mastquery import query, overlaps
+    
     eso = astroquery.eso.Eso()
     
     # Configure 'username' in ~/.astropy/config
@@ -59,11 +70,7 @@ def full_hawki_query(rd=None):
     tr = ctree.query_ball_tree(htree, r)
     n_hawki = np.array([len(t) for t in tr])
     
-    # Figures
-    from shapely.geometry import Polygon, Point
-    from descartes import PolygonPatch
-    from shapely import affinity 
-    
+    # Figures    
     idx = np.where(n_hawki > 0)[0]
     
     xsize = 5

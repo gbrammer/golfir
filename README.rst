@@ -21,7 +21,7 @@ Installation:
     
         $ git clone git@github.com:gbrammer/golfir.git
         $ cd golfir
-        $ pip install . 
+        $ pip install . -r requirements.txt
         
 Usage:
 ~~~~~~

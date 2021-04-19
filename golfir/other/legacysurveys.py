@@ -2,6 +2,10 @@
 Prepare images from legacysurveys.org for use with GOLFIR
 """
 import glob
+import os
+
+import numpy as np
+
 import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 
@@ -9,7 +13,7 @@ def image_prep(root='j112716p4228', brick='1717p425', pad=16):
     """
     Prepare image mosaics
     """
-    
+
     hst_files = glob.glob(f'{root}-[fi][1r]*sci.fits*')
     lfiles = glob.glob(f'*-{brick}*image*fits.fz')
     
@@ -70,6 +74,10 @@ def image_prep(root='j112716p4228', brick='1717p425', pad=16):
         pyfits.PrimaryHDU(data=wht_data, header=head).writeto(f'{root}-{filt}_drz_wht.fits', overwrite=True)
 
 def make_psf(root='j112716p4228', psf_rd=None, ds9=None, N=32):
+    """
+    Make the image PSF
+    """
+    import matplotlib.pyplot as plt
     
     from grizli import utils
     from golfir.irac import MixturePSF  
@@ -109,6 +117,7 @@ def make_psf(root='j112716p4228', psf_rd=None, ds9=None, N=32):
                 
         pyfits.PrimaryHDU(data=psf, header=h).writeto(file.replace('_drz_sci', '_psf'), overwrite=True)
 
+
 def run_model(root=''):
     
     import golfir.irac
@@ -125,6 +134,9 @@ def run_model(root=''):
     window = CosineBellWindow(1) 
     
     fitter = LevMarLSQFitter()
+    
+    import grizli.ds9
+    ds9 = grizli.ds9.DS9()
     
     P0 = None
     bkg_func = None

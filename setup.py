@@ -16,7 +16,7 @@ version = p.communicate()[0].decode("utf-8").strip()
 #version = "0.1" # init
 
 # Set this to true to add install_requires to setup
-if True:
+if False:
     install_requires=[
          'astropy>=4.0',
          'photutils>=0.7.0',

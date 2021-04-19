@@ -46,6 +46,7 @@ except:
     print("(golfir.model) Warning: failed to import grizli")
     
 from . import utils
+from . import irac
 
 # from golfir.utils import get_wcslist, _obj_shift
 # from golfir import irac
@@ -151,52 +152,8 @@ class ImageModeler(object):
         else:
             self.full_model = self.lores_im.data.byteswap().newbyteorder()*0
             self.full_bg = self.lores_im.data.byteswap().newbyteorder()*0
-        
-        # testing
-        if False:
-            bright = [12,16]
-            bright = [18,18]
-            bright_args = dict(any_limit=bright[0], point_limit=bright[1], point_flux_radius=3.5, bright_ids=None, bright_sn=7)
-            mag_limit = 24
-            
-            reload(golfir.model)
-            self = golfir.model.ImageModeler() 
-            self.patch_initialize(rd_patch=None, patch_arcmin=0.6, ds9=ds9, patch_id=0)
-            
-            self.patch_compute_models(mag_limit=mag_limit, **bright_args)
-            
-            self.patch_least_squares()
-            self.patch_display(ds9=ds9)
-            
-            self.patch_align()
-            ds9.frame(15)
-            ds9.view(self.patch_resid*self.patch_mask,
-                     header=self.patch_header)
-            
-            # Regenerate models with alignment transform
-            self.patch_compute_models(mag_limit=mag_limit, **bright_args)
-            self.patch_least_squares()
-            ds9.frame(16)
-            ds9.view(self.patch_resid*self.patch_mask,
-                     header=self.patch_header)
-            
-            self.patch_align()
-            ds9.frame(17)
-            ds9.view(self.patch_resid*self.patch_mask,
-                     header=self.patch_header)
-            
-            # Bright star
-            brighter_args = dict(any_limit=2, point_limit=2, point_flux_radius=3.5, bright_ids=None, bright_sn=7)
-            self.patch_bright_limits(**brighter_args)
-            
-            self.patch_fit_galfit(ids=[1684], component_type='psf', chi2_threshold=10)
-            ds9.frame(18)
-            ds9.view(self.patch_resid*self.patch_mask,
-                     header=self.patch_header)
-            
-            self.patch_fit_galfit(ids=[2019,2020], component_type=None, chi2_threshold=10)
-            self.patch_fit_galfit(ids=[2235,2351], component_type=None, chi2_threshold=10)
-            
+
+
     @staticmethod
     def fetch_from_aws(root):
         """
@@ -224,7 +181,8 @@ class ImageModeler(object):
             
         if not os.path.exists(f'{root}_irac_phot.fits'):
             os.system(f'cp {root}_phot.fits {root}_irac_phot.fits')
-            
+
+
     def read_hst_data(self, prefer_filter='f160w'):
         """
         Read HST data
@@ -368,7 +326,7 @@ class ImageModeler(object):
         """
         Read low-res (e.g., IRAC)
         """
-        from golfir import irac
+        #from golfir import irac
         import scipy.ndimage as nd
         
         self.use_avg_psf = use_avg_psf
@@ -769,8 +727,7 @@ class ImageModeler(object):
         """
         Compute hst-to-IRAC components for objects in the patch
         """
-        from golfir import irac
-        
+                
         hst_slice = self.hst_ujy[self.hst_sly, self.hst_slx]
         if id_list is None:
             ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
@@ -931,7 +888,7 @@ class ImageModeler(object):
         _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
                                       dec=phot['dec'][ix][0], min_count=0, 
                                       clip_negative=True, 
-                                      transform=xy_offset[i])
+                                      transform=xy_offset)
 
         lores_psf, psf_exptime, psf_count = _  
                                     
@@ -1256,7 +1213,6 @@ class ImageModeler(object):
         
         """
         from golfir.utils import get_wcslist, _obj_shift
-        from golfir import irac
         
         t0 = np.array([0,0,0,1])*np.array([1,1,1,100.])
         t0 = t0[:align_type+1]
@@ -1328,6 +1284,7 @@ class ImageModeler(object):
         for id in ids:            
             if id < 0:
                 # IDs that touch
+                seg_sl = self.patch_seg_lores
                 xmsk = (seg_sl == -id)
                 msk_dil = binary_dilation(xmsk, np.ones((dil_size,dil_size)))
                 fit_ids.extend(list(np.unique(seg_sl[msk_dil])[1:]))
@@ -2118,17 +2075,17 @@ class ImageModeler(object):
         
         if make_figure:
             
-            if (csum <= 0) & (vm is 'Auto'):
+            if (csum <= 0) & (vm in ['Auto']):
                 vm = 'Default'
                 
-            if vm is 'Auto':
+            if vm in ['Auto']:
                 cmax = np.maximum(csum, 5*csum/aper_data[3]/0.3*aperr)
                 
                 if 'LogSt' in stretch.__str__():
                     vm = np.array([-0.001, 0.11])*0.3*cmax
                 else:
                     vm = np.array([-0.02, 0.11])*0.2*cmax
-            elif vm is 'Default':
+            elif vm in ['Default']:
                 if 'LogSt' in stretch.__str__():
                     vm = np.array([-0.001, 0.11])*1.5
                 else:

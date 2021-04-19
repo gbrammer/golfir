@@ -134,7 +134,11 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
             print(f'drizzle_simple (iter={iter_pass}): ', i, aor, aors[aor].N)
             aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, pixfrac=pixfrac, flat_background=flat_background, med_max_size=med_max_size, force_pedestal=force_pedestal, extra_mask=extra_mask)#'point')
         
-        if 0:
+        if False:
+            # Testing
+            import grizli.ds9
+            ds9 = grizli.ds9.DS9()
+            
             i0 = int(ds9.get('frame'))
             for i, aor in enumerate(aor_ids):
                 sci, wht, ctx, head, w = aors[aor].drz
@@ -220,81 +224,7 @@ def process_all(channel='ch1', output_root='irac', driz_scale=0.6, kernel='point
             aors[aor].tab = aors[aor].wcs_table()
         
     return aors
-    
-    # PSF
-    psf_coords = (340.8852003, -9.604230278)
-    for i, aor in enumerate(aors):
-        print('PSF', i, aor, aors[aor].N)
-        aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, psf_coords=psf_coords, pixfrac=pixfrac, med_max_size=med_max_size)
-        
-        sci, wht, ctx, head, w = aors[aor].drz
 
-        root_i = '{0}-{1}-{2}'.format(output_root, aor, output_label)
-        pyfits.writeto('{0}_psf_sci.fits'.format(root_i), data=sci*100, header=head, overwrite=True)
-        pyfits.writeto('{0}_psf_wht.fits'.format(root_i), data=wht, header=head, overwrite=True)
-
-        
-    ds9.frame(i0+1)
-    ds9.view(drz_sci, header=head)
-    
-    # apers = [a*u.arcsec for a in [1,2,3,4,5,6,8,10,12,15,20]]
-    # cat = prep.make_SEP_catalog(root=irac_root, threshold=1.4, get_background=True, bkg_only=False, bkg_params={'fw': 3, 'bw': 32, 'fh': 3, 'bh': 32}, verbose=True, sci=None, wht=None, phot_apertures=apers, rescale_weight=True, column_case=str.upper, save_to_fits=True, source_xy=None, autoparams=[2.5, 3.5], mask_kron=False, max_total_corr=2, err_scale=-np.inf)
-    # 
-    # ok = cat['FLAG_APER_7'] == 0
-    # flux_ratio = cat['FLUX_APER_2']/cat['FLUX_APER_7']
-    # plt.scatter(cat['MAG_AUTO'][ok], flux_ratio[ok], alpha=0.2)
-    # 
-    # Force photometry
-    
-    root='j112000p0641'
-    root = os.getcwd().split('/')[-3]
-    phot = utils.read_catalog('../{0}_phot.fits'.format(root))
-    apers = [3*u.arcsec]
-    apcorr = 1./0.70
-    
-    cat = prep.make_SEP_catalog(root=irac_root, threshold=1.4, get_background=True, bkg_only=False, bkg_params={'fw': 3, 'bw': 32, 'fh': 3, 'bh': 32}, verbose=True, sci=None, wht=None, phot_apertures=apers, rescale_weight=True, column_case=str.upper, save_to_fits=True, source_xy=(phot['ra'], phot['dec']), autoparams=[2.5, 3.5], mask_kron=False, max_total_corr=2, err_scale=-np.inf)
-    
-    phot['irac_ch1_flux'] = cat['FLUX_APER_0']*apcorr
-    phot['irac_ch1_err'] = cat['FLUXERR_APER_0']*apcorr
-    mask = cat['MASK_APER_0'] > 3
-    phot['irac_ch1_flux'][mask] = -99
-    phot['irac_ch1_err'][mask] = -99
-    
-    phot.meta['IRAC_APCORR'] = apcorr
-    
-    phot.write('../{0}_phot.fits'.format(root), overwrite=True)
-    
-    # Apcorr
-    import astropy.io.fits as pyfits
-    import numpy as np
-    import stsci.convolve
-    
-    himg = pyfits.open('../j004400m2034-f160w_drz_sci.fits')
-    psf = pyfits.open('/Users/gbrammer/Downloads/apex_core_irac_warm_PRFs/apex_sh_IRACPC1_col129_row129_x100.fits')
-    N = 64
-    psfd = psf[0].data[::5,::5][255-N:255+N,255-N:255+N] # ~0.06"
-    psfd /= psfd.sum()
-        
-    #hsm = nd.convolve(himg[0].data, psfd)
-    slx, sly = slice(x0,x0+2048), slice(y0,y0+2048)
-    #data = himg[0].data[sly, slx]
-    data = himg[0].data
-    
-    hsm = stsci.convolve.convolve2d(data, psfd, output=None, mode='nearest', cval=0.0, fft=1)
-    
-    import sep
-    
-    aper3 = 3/0.06
-    flux, fluxerr, flag = sep.sum_circle(data.byteswap().newbyteorder(), 
-                                  phot['x_image']-1, phot['y_image']-1,
-                                  aper3/2, err=data*0.+1, 
-                                  gain=2000., subpix=5)
-    #
-    fluxsm, fluxerr, flag = sep.sum_circle(hsm.astype('>f4').byteswap().newbyteorder(), 
-                                  phot['x_image']-1, phot['y_image']-1,
-                                  aper3/2, err=data*0.+1, 
-                                  gain=2000., subpix=5)
-#
 
 dx = 0.5
 dp = [0,0]
@@ -313,11 +243,6 @@ def get_bcd_psf(ra=0, dec=0, wcs=None, channel=1, dx=dx, dd=dp):
     import astropy.io.fits as pyfits
     import astropy.wcs as pywcs
 
-    if False:
-        ra, dec = 340.8852003, -9.604230278
-        i=20
-        wcs = self.wcs[i]
-    
     xy = np.array(wcs.all_world2pix([ra], [dec], 0)).flatten()
         
     if (xy.min() < -12) | (xy.max() > 256+12):
@@ -369,9 +294,9 @@ class IracAOR():
     @staticmethod
     def read_cbcd(file, instrument='irac', use_brmsk=True):
         
-        if 'xbcd' in file:
-            _res = read_xbcd(file)
-            return _res
+        # if 'xbcd' in file:
+        #     _res = read_xbcd(file)
+        #     return _res
         
         with pyfits.open(file) as im:
             cbcd = im[0].data.astype(np.float32)
@@ -625,60 +550,8 @@ class IracAOR():
         ds = self.shifts - s0
         
         return ds
-    
-    def pipeline(self, ds9=None):
-        pass
-        
-        phot = utils.read_catalog('../j232508m1212_phot_apcorr.fits')
-        hmag = 23.9-2.5*np.log10(phot['flux_auto_fix'])
-        ref = phot[hmag < 22]
-        
-        med_wcs, med = self.make_median_image(max_size=60e6)
-        
-        merr = np.ones_like(med, dtype=np.float)*utils.nmad(med[med != 0])
-        mcat, mseg = prep.make_SEP_catalog_from_arrays(med.byteswap().newbyteorder(), merr.byteswap().newbyteorder(), (med == 0), segmentation_map=True, threshold=1.1, wcs=med_wcs, get_background=True)
-        
-        so = np.argsort(mcat['flux'])
-        ref = mcat#[so[:150]]
-        
-        blot_data = self.blot(med_wcs, med)        
-        pedestal, med2d = self.get_median()
-        nmad = self.get_nmad(median=med2d)
-                
-        # Add extra term in bright sources
-        fmax = 0.5
-        eblot = 1-np.clip(blot_data, 0, fmax)/fmax
-        
-        self.dq = self.orig_dq |  ((self.cbcd - med2d - blot_data)*np.sqrt(self.ivar)*eblot > 7)
-        
-        ds = self.get_shifts(ref=ref)
-        self.shift_wcs = [utils.transform_wcs(self.wcs[i], translation=-self.shifts[i,:], rotation=-self.rot[i], scale=1.0) for i in range(self.N)]
-        
-        # Second iteration
-        med_wcs2, med2 = self.make_median_image()
-        blot_data2 = self.blot(med_wcs2, med2)
-        
-        ds9.frame(1)
-        ds9.view(((self.cbcd - blot_data - med2d)*(self.dq == 0))[j,:,:])
-        
-        ds9.frame(2)
-        ds9.view(((self.cbcd - blot_data2 - med2d)*(self.dq == 0))[j,:,:])
-        
-        for iter in range(3):
-            fmax = 0.5
-            eblot = 1-np.clip(blot_data2, 0, fmax)/fmax
 
-            self.dq = self.orig_dq |  ((self.cbcd - med2d - blot_data)*np.sqrt(self.ivar)*eblot > 4.5)
-        
-            ds = self.get_shifts(ref=ref)
-            self.shift_wcs = [utils.transform_wcs(self.wcs[i], translation=-self.shifts[i,:], rotation=-self.rot[i], scale=1.0) for i in range(self.N)]
 
-            med_wcs2, med2 = self.make_median_image()
-            blot_data2 = self.blot(med_wcs2, med2)
-            
-            ds9.frame(iter+3)
-            ds9.view(((self.cbcd - blot_data2 - med2d)*(self.dq == 0))[j,:,:])
-    
     def drizzle_simple(self, force_pedestal=True, dq_sn=5, fmax=0.5, flat_background=False, extra_mask=None, med_max_size=60e6, **kwargs):
         
         if (not hasattr(self, 'pedestal')) | force_pedestal: 
@@ -947,25 +820,9 @@ class IracAOR():
             pyfits.writeto('{0}-{1}_med.fits'.format(self.name, self.label), 
                            data=self.med2d[0,:,:] - self.pedestal[0],
                            overwrite=True)
-                           
-if __name__ == '__main__':
-    psf_coords = (340.8852003, -9.604230278, get_bcd_psf)
-    
-    psf_coords = list(np.cast[float](ds9.get('pan fk5').split()))+[get_bcd_psf]
-    
-    kwargs = dict(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, psf_coords=psf_coords)
-    res = aors[aor].drizzle_output(pedestal=aors[aor].pedestal, **kwargs)
-    
-    #aors[aor].drz = aors[aor].drizzle_simple(wcslist=wcslist, driz_scale=driz_scale, theta=0, kernel=kernel, out_hdu=out_hdu, pad=pad, psf_coords=psf_coords)
 
-    sci, wht, ctx, head, w = res #aors[aor].drz
-    ds9.view(sci*1000, header=head); ds9.set('pan to {0} {1} fk5'.format(psf_coords[0], psf_coords[1]))
 
-    root_i = '{0}-{1}-{2}'.format(output_root, aor, channel)
-    pyfits.writeto('{0}_psf_sci.fits'.format(root_i), data=sci*100, header=head, overwrite=True)
-    pyfits.writeto('{0}_psf_wht.fits'.format(root_i), data=wht, header=head, overwrite=True)
-        
-def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0.2, kernel='square', aors={}, size=18, subtract_background=True, segmentation_mask=False, theta=0, native_orientation=False, instrument='irac', max_R=3.5):
+def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0.2, kernel='square', aors={}, size=18, subtract_background=True, segmentation_mask=False, theta=0, native_orientation=False, instrument='irac', max_R=3.5, ds9=None):
     from grizli import prep
     from astropy.modeling.models import Gaussian2D  
     import astropy.units as u
@@ -1100,11 +957,9 @@ def mosaic_psf(output_root='irac', channel=1, pix=0.5, target_pix=0.1, pixfrac=0
                 sci_sum += sci_i*wht_i*scl*mask
 
             print(i, sra, sdec, scl, (1-mask).sum(), wht_i.max())
-            
-            try:
+
+            if ds9 is not None:
                 ds9.view(sci_sum/wht_sum*1000)
-            except:
-                pass
         
         if sci_sum is None:
             continue

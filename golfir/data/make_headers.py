@@ -6,6 +6,7 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 
 def go():
+    from grizli import utils
     
     os.system('aws s3 sync s3://grizli-v1/IRAC/AORS/r48106752/ch1/bcd/ ./ --exclude "*" --include "*752_0001*"')
     os.system('aws s3 sync s3://grizli-v1/IRAC/AORS/r48106752/ch2/bcd/ ./ --exclude "*" --include "*752_0001*"')
