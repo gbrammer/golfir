@@ -1,5 +1,33 @@
+
+def get_eso():
+    import astroquery.eso
+    eso = astroquery.eso.Eso()
     
-def full_hawki_query(rd=None):
+    # Configure 'username' in ~/.astropy/config
+    eso.login() 
+    return eso
+    
+def full_query(filters=['Ks'], min_nexp=5, eso=None):
+    
+    if eso is None:
+        eso = get_eso()
+        
+    kwargs = {}
+    kwargs['column_filters'] = {}
+    kwargs['column_filters']['tpl_nexp'] = [f'> {min_nexp}']
+    kwargs['column_filters']['tpl_expno'] = [1]
+    kwargs['column_filters']['ins_filt1_name'] = filters
+    kwargs['column_filters']['dp_cat'] = ['SCIENCE']
+    #kwargs['column_filters']['dp_tech'] = ['IMAGE']
+    kwargs['column_filters']['pi_coi_name'] = 'PI_only'
+    
+    kwargs['columns'] = ['tpl_nexp', 'tpl_expno', 'det_ndit', 'det_dit', 'det_ncorrs_name', 'obs_tmplno', 'det_ncorrs_name', 'prog_type', 'pi_coi']
+    
+    res = eso.query_instrument('hawki', pi_coi_name='PI_only', **kwargs)
+    res['PI'] = [p.split('/')[0].strip() for p in res['PI/CoI']]
+    return eso, kwargs, res
+    
+def full_hawki_query(rd=None, query_result=None, eso=None):
     """
     Query all HAWKI observations....
     """ 
@@ -11,29 +39,17 @@ def full_hawki_query(rd=None):
     from descartes import PolygonPatch
     from shapely import affinity 
     
-    import astroquery.eso
     from grizli import utils
     from mastquery import query, overlaps
     
-    eso = astroquery.eso.Eso()
-    
-    # Configure 'username' in ~/.astropy/config
-    eso.login() 
-    
-    kwargs = {}
-    kwargs['column_filters'] = {}
-    kwargs['column_filters']['tpl_nexp'] = ['> 5']
-    kwargs['column_filters']['tpl_expno'] = [1]
-    kwargs['column_filters']['ins_filt1_name'] = ['Ks']
-    kwargs['column_filters']['dp_cat'] = ['SCIENCE']
-    #kwargs['column_filters']['dp_tech'] = ['IMAGE']
-    kwargs['column_filters']['pi_coi_name'] = 'PI_only'
-    
-    kwargs['columns'] = ['tpl_nexp', 'tpl_expno', 'det_ndit', 'det_dit', 'det_ncorrs_name', 'obs_tmplno', 'det_ncorrs_name', 'prog_type', 'pi_coi']
-    
-    res = eso.query_instrument('hawki', pi_coi_name='PI_only', **kwargs)
-    res['PI'] = [p.split('/')[0].strip() for p in res['PI/CoI']]
-    
+    if eso is None:
+        eso = get_eso()
+        
+    if query_result is None:
+        _, kwargs, res = full_query(eso=eso)
+    else:
+        kwargs, res = query_result
+        
     # surveys = 092.A-0472 
     
     # CHArGE fields
@@ -215,7 +231,6 @@ def full_hawki_query(rd=None):
             for k in kwargs:
                 kws[k] = kwargs[k].copy()
             
-                
             kws['column_filters'].pop('tpl_nexp')
             kws['column_filters'].pop('tpl_expno')
             
