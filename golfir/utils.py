@@ -18,8 +18,6 @@ try:
 except:
     print("(golfir.utils) Warning: failed to import grizli")
 
-from . import irac
-
 # try:
 #     import grizli.ds9
 #     ds9 = grizli.ds9.DS9()
@@ -161,6 +159,7 @@ def _obj_shift(transform, data, model, sivar, ret):
     Objective function for shifting the lores model
     """
     from skimage.transform import SimilarityTransform
+    from . import irac
     
     if len(transform) == 2:
         tf = np.array(transform)/10.
@@ -209,9 +208,9 @@ def _obj_shift(transform, data, model, sivar, ret):
 RESCALE_KWARGS = {'order':1,'mode':'constant', 'cval':0., 
                   'preserve_range':False, 'anti_aliasing':True}
 
-DRIZZLE_KWARGS = {'pixfrac':0.01, 'kernel':'point', 'verbose':False}
+DRIZZLE_KWARGS = {'pixfrac':1.0, 'kernel':'square', 'verbose':False}
 
-def resample_array(img, wht=None, pixratio=2, slice_if_int=True, int_tol=1.e-3, method='drizzle', drizzle_kwargs=DRIZZLE_KWARGS, rescale_kwargs=RESCALE_KWARGS, scale_by_area=False, verbose=False, blot_stepsize=-1):
+def resample_array(img, wht=None, pixratio=2, slice_if_int=True, int_tol=1.e-3, method='drizzle', drizzle_kwargs=DRIZZLE_KWARGS, rescale_kwargs=RESCALE_KWARGS, scale_by_area=False, verbose=False, blot_stepsize=-1, **kwargs):
     """
     Resample an image to a new grid.  If pixratio is an integer, just return a 
     slice of the input `img`.  Otherwise resample with `~drizzlepac` or `~resample`.
@@ -225,7 +224,24 @@ def resample_array(img, wht=None, pixratio=2, slice_if_int=True, int_tol=1.e-3, 
     if is_int & (pixratio > 1):
         # Integer scaling
         step = int(np.round(pixratio))
-        if slice_if_int:
+        if method.lower() == 'drizzle':
+            _, win = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                    pixscale=1., get_hdu=False, theta=0.)
+            
+            _, wout = make_wcsheader(ra=90, dec=0, size=img.shape, 
+                                     pixscale=pixratio, get_hdu=False, 
+                                     theta=0.)
+                        
+            if wht is None:
+                wht = np.ones_like(img)
+            
+            _drz = drizzle_array_groups([img], [wht], [win], outputwcs=wout,
+                                        **drizzle_kwargs)
+            res = _drz[0]
+            res_wht = _drz[1]
+            method_used = 'drizzle'
+            
+        elif slice_if_int:
             # Simple slice
             res = img[step//2::step, step//2::step]*1
             res_wht = np.ones_like(res)
@@ -637,6 +653,54 @@ def convolve_helper(data, kernel, method='fftconvolve', fill_scipy=False, cval=0
                          "'oaconvolve', 'stsci' ('xstsci').")
     
     return conv
+
+
+def warp_image(transform, image, warp_args={'order': 3, 'mode': 'constant', 'cval': 0.0}, center=None):
+    """
+    Warp an image with `skimage.transform`
+    
+    Parameters
+    ----------
+    transform : array-like
+        Transformation parameters
+        
+    image : 2D array-like
+        Image to warp
+    
+    warp_args : dict
+        Keyword arguments passed to `skimage.transform.warp`
+    
+    center : 2-element array or None
+        Image center.  If `None`, calculated as ``image.shape/2.-1``
+    
+    Returns
+    -------
+    warped : array-like
+        Shifted and rotated version of `image`
+        
+    """
+    from skimage.transform import SimilarityTransform, warp, rotate
+
+    trans = transform[0:2]
+    if len(transform) > 2:
+        rot = transform[2]
+        if len(transform) > 3:
+            scale = transform[3]
+        else:
+            scale = 1.
+    else:
+        rot = 0.
+        scale = 1.
+
+    if center is None:
+        center = np.array(image.shape)/2.-1
+
+    tf_rscale = SimilarityTransform(translation=trans/scale+center*(1-scale), rotation=None, scale=scale)
+
+    shifted = warp(image, tf_rscale.inverse, **warp_args)
+    rotated = rotate(shifted, rot, resize=False, center=center)
+
+    return rotated
 
 
 def argv_to_dict(argv, defaults={}, dot_dict=True):

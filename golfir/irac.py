@@ -19,6 +19,8 @@ from photutils import (HanningWindow, TukeyWindow,
                        CosineBellWindow,
                        SplitCosineBellWindow, TopHatWindow)
 
+from .utils import warp_image
+
 try:
     from drizzlepac.astrodrizzle import ablot
 except:
@@ -1685,13 +1687,15 @@ class IracPSF(object):
         psf_arrays = {'image':img, 'mask':msk, 'shape':psf_shape, 
                       'masked':masked}
         return psf_data, psf_arrays
-    
+
+
     def drizzle_psf(self, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
         """
         Drizzle a model PSF rather than rotating & resampling [TBD]
         """
         pass
-        
+
+
     def evaluate_psf(self, ra=228.7540568, dec=-15.3806666, min_count=5, clip_negative=True, transform=None, warp_args={'order':3, 'mode':'constant', 'cval':0.}):
         """
         Evaluate weighted PSF at a given location using saved PSFs for each AOR
@@ -1747,7 +1751,8 @@ class IracPSF(object):
             psf = warp_image(transform, psf, warp_args=warp_args)
             
         return psf/psf.sum(), exptime, count
-    
+
+
     def get_exposure_time(self, ra, dec, get_files=False, verbose=False):
         """
         Compute number of exposures and total exposure time for an array of 
@@ -1831,6 +1836,7 @@ class IracPSF(object):
         else:
             return new_header, expt, nexp
 
+
 def warp_catalog(transform, xy, image, center=None):
     
     from skimage.transform import SimilarityTransform, warp, rotate
@@ -1858,31 +1864,7 @@ def warp_catalog(transform, xy, image, center=None):
     rotated = tf_rot(shifted-center)+center
     
     return rotated
-    
-def warp_image(transform, image, warp_args={'order': 3, 'mode': 'constant', 'cval': 0.0}, center=None):
-    
-    from skimage.transform import SimilarityTransform, warp, rotate
-    
-    trans = transform[0:2]
-    if len(transform) > 2:
-        rot = transform[2]
-        if len(transform) > 3:
-            scale = transform[3]
-        else:
-            scale = 1.
-    else:
-        rot = 0.
-        scale = 1.
-        
-    if center is None:
-        center = np.array(image.shape)/2.-1
-        
-    tf_rscale = SimilarityTransform(translation=trans/scale+center*(1-scale), rotation=None, scale=scale)
-    
-    shifted = warp(image, tf_rscale.inverse, **warp_args)
-    rotated = rotate(shifted, rot, resize=False, center=center)
-    
-    return rotated
+
 
 def combine_products(wcsfile='r15560704/ch1/bcd/SPITZER_I1_15560704_0036_0000_6_wcs.fits', skip_existing=True):
     """
