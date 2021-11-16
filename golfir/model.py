@@ -154,6 +154,16 @@ class ImageModeler(object):
             self.full_bg = self.lores_im.data.byteswap().newbyteorder()*0
 
 
+    def __delete__(self):
+        """
+        Clean up HDF5
+        """
+        if hasattr(self, 'comp_hdu'):
+            if hasattr(self.comp_hdu.fp, 'mode'):
+                print('Delete: close h5py object')
+                self.comp_hdu.fp.close()
+
+
     @staticmethod
     def fetch_from_aws(root):
         """
@@ -264,6 +274,8 @@ class ImageModeler(object):
             phot['id_nn'] = phot['number'][nn[:,1]]
         
         self.phot = phot
+        self.phot_idx = np.zeros(phot['number'].max()+2, dtype=int) + 999999
+        self.phot_idx[phot['number']] = np.arange(len(phot))
         
         self.ref_file = ref_file
         self.ref_filter = ref_filter
@@ -385,7 +397,19 @@ class ImageModeler(object):
 
                     #avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
                     avg_psf = nd.gaussian_filter(avg_psf, grow_irsa_psf*1)
-                                   
+                
+                # Account for HST pixel scale
+                if not np.allclose(self.hst_wcs.pscale, 0.1, atol=1.e-3):
+                    cmt = f'Rescale {os.path.basename(psf_file)} to '
+                    cmt += f'{self.hst_wcs.pscale:.2f}" pixels'
+                    grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
+                           verbose=self.verbose, show_date=True)
+                    
+                    avg_resamp = utils.resample_array(avg_psf, 
+                                        pixratio=self.hst_wcs.pscale/0.1, 
+                                        method='rescale')[0]
+                    avg_psf = avg_resamp
+                
             self.avg_psf_file = psf_file
         else:
             avg_psf = None
@@ -413,9 +437,14 @@ class ImageModeler(object):
             self.ERR_SCALE = 1.
 
         elif filter in ['ch1','ch2','ch3','ch4']:
-            irac_im = pyfits.open('{0}-{1}_drz_sci.fits'.format(self.root, filter))[0]
-            irac_wht = pyfits.open('{0}-{1}_drz_wht.fits'.format(self.root, filter))[0].data
-            irac_psf_obj = irac.IracPSF(ch=int(filter[-1]), scale=0.1, verbose=self.verbose, avg_psf=avg_psf)
+            scistr = '{0}-{1}_drz_sci.fits'
+            whtstr = '{0}-{1}_drz_wht.fits'
+            irac_im = pyfits.open(scistr.format(self.root, filter))[0]
+            irac_wht = pyfits.open(whtstr.format(self.root, filter))[0].data
+            
+            #rscale = int(np.round(self.hst_wcs.pscale*100))/100
+            irac_psf_obj = irac.IracPSF(ch=int(filter[-1]), scale=0.1,
+                                        verbose=self.verbose, avg_psf=avg_psf)
 
             self.ERR_SCALE = 1.
             # if os.path.exists('{0}-{1}.cat.fits'.format(self.root, filter)):
@@ -427,8 +456,8 @@ class ImageModeler(object):
             try:
                 irac_wcs = pywcs.WCS(irac_im.header)
                 irac_wcs.pscale = grizli.utils.get_wcs_pscale(irac_wcs)
-                #pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
-                pf = irac_wcs.pscale/self.hst_wcs.pscale
+                pf = int(np.round(irac_wcs.pscale/self.hst_wcs.pscale))
+                #pf = irac_wcs.pscale/self.hst_wcs.pscale
             except:
                 pf = 5
 
@@ -525,7 +554,8 @@ class ImageModeler(object):
         self.hst_psf_full = hst_psf_full
     
         self.psf_window = window
-        
+
+
     @property
     def lores_sivar(self):
         if np.isfinite(self.ERR_SCALE):
@@ -725,7 +755,8 @@ class ImageModeler(object):
         
         self._Abg = np.array(_Abg)
         self.Nbg = self._Abg.shape[0]
-        
+
+
     def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', id_list=None, individual_psf=True, psf_kernel=None, kernel_correction=0, **kwargs):
         """
         Compute hst-to-IRAC components for objects in the patch
@@ -735,10 +766,10 @@ class ImageModeler(object):
         if id_list is None:
             ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
 
-            if (self.phot['number'][ids-1] - ids).sum() == 0:
-                mtest = self.phot['mag_auto'][ids-1] < mag_limit
+            if (self.phot['number'][self.phot_idx[ids]] - ids).sum() == 0:
+                mtest = self.phot['mag_auto'][self.phot_idx[ids]] < mag_limit
                 if mag_limit < 0:
-                    mtest = self.phot['flux_auto'][ids-1]/self.phot['fluxerr_auto'][ids-1] > -mag_limit
+                    mtest = self.phot['flux_auto'][self.phot_idx[ids]]/self.phot['fluxerr_auto'][self.phot_idx[ids]] > -mag_limit
                     msg = 'S/N > {0:.1f}'.format(-mag_limit, mtest.sum())
                 else:
                     msg = 'mag_auto < {0:.1f}'.format(mag_limit, mtest.sum())
@@ -764,6 +795,7 @@ class ImageModeler(object):
             
         self.patch_nobj = N
         self.patch_ids = ids
+        self.patch_idx = self.phot_idx[self.patch_ids]
         
         grizli.utils.log_comment(self.LOGFILE, 
                f'Compute {N} models for patch ({msg})',
@@ -775,7 +807,7 @@ class ImageModeler(object):
         phot = self.phot
         
         # Translation
-        patch_xy = self.lores_xy[self.patch_ids-1,:] - self.patch_ll
+        patch_xy = self.lores_xy[self.patch_idx,:] - self.patch_ll
         
         xy_warp = irac.warp_catalog(self.patch_transform, patch_xy, 
                                     self.patch_sci.reshape(self.patch_shape),
@@ -833,10 +865,9 @@ class ImageModeler(object):
                                         
             # Reshape into lores grid
             _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
-                                   slice_if_int=True, int_tol=1.e-3, 
                                    method=resample_method, 
                                    scale_by_area=False, 
-                                   verbose=False)[0]
+                                   verbose=False, **kwargs)[0]
                                    
             _A.append(_Alo.flatten()*self.pf**2)                 
 
@@ -849,6 +880,8 @@ class ImageModeler(object):
         keep = self.Anorm > 0
         self._A = (self._A[keep,:].T/self.Anorm[keep]).T
         self.patch_ids = self.patch_ids[keep]
+        self.patch_idx = self.phot_idx[self.patch_ids]
+        
         self.Anorm = self.Anorm[keep]
         self.patch_nobj = keep.sum()
         self.model_bright = 0.
@@ -861,13 +894,15 @@ class ImageModeler(object):
         patch_xyint = np.clip(np.cast[int](np.round(patch_xy)), 0, self.patch_shape[-1]-1)
         self.patch_ids_in_border = ~self.patch_border_mask.reshape(self.patch_shape)[patch_xyint[:,1], patch_xyint[:,0]]
         self.patch_border_ids = self.patch_ids[self.patch_ids_in_border]
+        self.patch_border_idx = self.phot_idx[self.patch_border_ids]
         
         # Bright limits
         self.patch_bright_limits(**kwargs)
         
         return True
-        
-    def patch_replace_model(self, id, hst_ujy=None, segmask=False, resample_method='rescale'):
+
+
+    def patch_replace_model(self, id, hst_ujy=None, segmask=False, resample_method='rescale', **kwargs):
         """
         Regenerate the IRAC model for a given source using a different HST 
         image.
@@ -877,7 +912,7 @@ class ImageModeler(object):
         
         ix = phot['number'] == id
         
-        patch_xy = self.lores_xy[self.patch_ids-1,:] - self.patch_ll
+        patch_xy = self.lores_xy[self.patch_idx,:] - self.patch_ll
         
         xy_warp = irac.warp_catalog(self.patch_transform, patch_xy, 
                                     self.patch_sci.reshape(self.patch_shape),
@@ -910,15 +945,15 @@ class ImageModeler(object):
                                                       
         # Reshaped
         _Alo = utils.resample_array(_Ai, wht=None, pixratio=self.pf, 
-                               slice_if_int=True, int_tol=1.e-3, 
                                method=resample_method, 
                                scale_by_area=False, 
-                               verbose=False)[0]
+                               verbose=False, **kwargs)[0]
         
         Aix = np.where(self.patch_ids == id)[0][0]
         self._A[Aix,:] = _Alo.flatten()*self.pf**2
-        
-    def patch_iraclean(self):
+
+
+    def patch_iraclean(self, **kwargs):
         
         yp, xp = np.indices(self.patch_shape)
         
@@ -954,9 +989,8 @@ class ImageModeler(object):
             #psf_i = psf_full_i[self.pf//2::self.pf, self.pf//2::self.pf]
             psf_i = utils.resample_array(self.patch_seg, 
                                    wht=None, pixratio=self.pf, 
-                                   slice_if_int=True, int_tol=1.e-3, 
                                    method='rescale', scale_by_area=False, 
-                                   verbose=False)[0]
+                                   verbose=False, **kwargs)[0]
                                    
             psf_i /= psf_i.sum()
             sh = psf_i.shape
@@ -1048,9 +1082,9 @@ class ImageModeler(object):
         """
         phot = self.phot
         
-        bright = (phot['mag_auto'][self.patch_ids-1] < any_limit) 
-        bright |= ((phot['mag_auto'][self.patch_ids-1] < point_limit) &
-                  (phot['flux_radius'][self.patch_ids-1] < point_flux_radius))
+        bright = (phot['mag_auto'][self.patch_idx] < any_limit) 
+        bright |= ((phot['mag_auto'][self.patch_idx] < point_limit) &
+                  (phot['flux_radius'][self.patch_idx] < point_flux_radius))
                 
         if bright_ids is not None:
             for ii in bright_ids:
@@ -1207,7 +1241,8 @@ class ImageModeler(object):
                 fig.savefig('{0}.{1}'.format(self.patch_label.replace(' ', '_'), savefig))
                 plt.ion()
                 plt.close('all')
-                
+
+
     def patch_align(self, align_type=3, **kwargs):
         """
         Realign
@@ -1265,10 +1300,12 @@ class ImageModeler(object):
         self.patch_bright_limits(**self.bright_args)
         
         self.patch_least_squares()
-    
+
+
     # Sersic -> Gaussian 
     GAUSS_KEYS = {'n':0.5, 'R_e':0.05, 'q':1., 'pa':0., 
                   'fix':{'n':0, 'R_e':1, 'q':0, 'pa':0}}
+
 
     def patch_fit_galfit(self, ids=[], dil_size=11, component_type=None, match_geometry=False, fit_sky=True, component_keys={}, min_err=0.00, chi2_threshold=10, ds9=None, use_oversampled_psf=False, use_flat_rms=True, **kwargs):
         """
@@ -1377,10 +1414,10 @@ class ImageModeler(object):
                     #galfit_psf = galfit_psf_full[self.pf//2::self.pf, self.pf//2::self.pf]
                     galfit_psf = utils.resample_array(galfit_psf_full, 
                                            wht=None, pixratio=self.pf, 
-                                           slice_if_int=True, int_tol=1.e-3, 
                                            method='rescale',
                                            scale_by_area=False, 
-                                           verbose=False)[0]
+                                           verbose=False, 
+                                           **kwargs)[0]
                 else:
                     galfit_psf = galfit_psf_full*1
            
@@ -1607,7 +1644,7 @@ class ImageModeler(object):
         # Put ERR_SCALE in catalog header
         phot.meta['{0}_ERR_SCALE'.format(self.column_root.upper())] = self.ERR_SCALE
 
-        ix = self.patch_ids - 1
+        ix = self.patch_idx*1
         
         if clip_border:            
             ix = ix[~self.patch_ids_in_border]
@@ -1630,7 +1667,7 @@ class ImageModeler(object):
             phot.meta['{0}_apcorr'.format(column_root)] = apcorr
                     
         if self.patch_is_bright is not None:
-            ix_bright = (self.patch_ids - 1)[self.patch_is_bright]
+            ix_bright = self.patch_idx[self.patch_is_bright]
             phot['{0}_bright'.format(column_root)][ix_bright] = 1
 
         phot.write(f'{self.root}_irac_phot.fits', overwrite=True)
@@ -1792,8 +1829,8 @@ class ImageModeler(object):
         # Galfit refinement
         if galfit_flux_limit is not None:
             # bright ids
-            ix = self.patch_ids -1
-            
+            #ix = self.patch_ids -1
+            ix = self.patch_idx*1
              
             if galfit_flux_limit > 0:
                 fit_bright = self.patch_obj_coeffs > galfit_flux_limit
