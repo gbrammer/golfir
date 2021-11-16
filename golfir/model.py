@@ -1999,7 +1999,7 @@ class ImageModeler(object):
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
     
-    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, use_valid_mask=True, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='cubehelix_r', fig_apargs=dict(color='w', alpha=0.3, linewidth=2),  labeleargs=dict(fontsize=9, va='top')):
+    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, use_valid_mask=True, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='twilight_shifted', fig_apargs=dict(color='w', alpha=0.3, linewidth=2),  labeleargs=dict(fontsize=9, va='top')):
         """
         Forced aperture photometry. 
         
