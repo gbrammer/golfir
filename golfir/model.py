@@ -63,7 +63,7 @@ class model_psf(object):
         
 class ImageModeler(object):
     
-    def __init__(self, root='j132352p2725', prefer_filter='f160w', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, lsq_fitter='lstsq', conv_method='fftconvolve', **kwargs):
+    def __init__(self, root='j132352p2725', prefer_filter='f160w', seg_prefix='ir', lores_filter='ch1', verbose=True, psf_only=False, use_avg_psf=True, lsq_fitter='lstsq', conv_method='fftconvolve', **kwargs):
         self.root = root
         self.LOGFILE=f'{root}.modeler.log.txt'
         self.verbose = verbose
@@ -80,7 +80,7 @@ class ImageModeler(object):
         self.conv_method = conv_method
         
         # Read High-res (Hubble) data
-        self.read_hst_data(prefer_filter=prefer_filter)
+        self.read_hst_data(prefer_filter=prefer_filter, seg_prefix=seg_prefix)
         
         # Dilate seg image
         if os.path.exists(f'{root}_waterseg.fits'):
@@ -193,17 +193,20 @@ class ImageModeler(object):
             os.system(f'cp {root}_phot.fits {root}_irac_phot.fits')
 
 
-    def read_hst_data(self, prefer_filter='f160w'):
+    def read_hst_data(self, prefer_filter='f160w', seg_prefix='ir'):
         """
         Read HST data
         """
         
         ref_files = glob.glob(f'{self.root}-{prefer_filter}*_dr?_sci.fits*')
         
+        self.prefer_filter = prefer_filter
+        self.seg_prefix = seg_prefix
+        
         if len(ref_files) == 0:
             ref_files = glob.glob('{0}-f1*_drz_sci.fits*'.format(self.root))
             if len(ref_files) == 0:
-                ref_files = glob.glob(f'{self.root}-ir*_dr*_sci.fits*')
+                ref_files = glob.glob(f'{self.root}-{seg_prefix}*_dr*_sci.fits*')
                 
             ref_files.sort()
             ref_file = ref_files[-1]
@@ -228,7 +231,7 @@ class ImageModeler(object):
                                   
         hst_psf /= hst_psf.sum()
 
-        hst_seg = pyfits.open(self.root+'-ir_seg.fits')[0].data
+        hst_seg = pyfits.open(f'{self.root}-{seg_prefix}_seg.fits')[0].data
         # Need doubled seg for ACS?
         if hst_seg.shape[0]*2 == hst_im[0].data.shape[0]:
             print('Making 2x segmentation image')
