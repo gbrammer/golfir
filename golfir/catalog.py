@@ -1707,7 +1707,7 @@ class FilterDetection(object):
         
         """
         from skimage.segmentation import watershed
-        from skimage.segmentation import expand_labels
+        #from skimage.segmentation import expand_labels
         
 
         ##### Layer 0            
