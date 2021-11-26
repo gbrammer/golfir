@@ -1047,7 +1047,7 @@ class ImageModeler(object):
                 p_model = _Ap[1:].T.dot(_xp[0])
                 msum = _xp[0].sum()
    
-    def comp_to_patch(self, id, full_image=False, flatten=True):
+    def comp_to_patch(self, id, full_image=False, flatten=True, verbose=False):
         """
         Put a stored component into the patch coordinates
         """    
@@ -1068,17 +1068,23 @@ class ImageModeler(object):
         
         slx = slice(hdu.header['XMIN']-ll[0], hdu.header['XMAX']-ll[0])
         sly = slice(hdu.header['YMIN']-ll[1], hdu.header['YMAX']-ll[1])
-        try:
-            patch[sly, slx] += hdu.data
+        
+        hsh = hdu.data.shape
+        cutout = patch[sly, slx]
+        
+        if cutout.shape != hsh:
+            if verbose:
+                print(f"comp_to_patch({id}) model shape {hsh} doesn't match "
+                      f"cutout shape {cutout.shape}")
+            return None
+        else:
+            cutout += hdu.data # parent patch should be updated
             if flatten:
                 return patch.flatten()
             else:
                 return patch
-                
-        except:
-            print(f'comp_to_patch({id}) failed')
-            return None
-            
+
+
     def patch_bright_limits(self, any_limit=12, point_limit=16, point_flux_radius=3.5, bright_ids=None, bright_sn=7, **kwargs):
         """
         Set masking for bright objects
@@ -1676,20 +1682,14 @@ class ImageModeler(object):
         phot.write(f'{self.root}_irac_phot.fits', overwrite=True)
         
         if multicomponent_file:
-            self.save_multicomponent_model()
-            
-    def save_multicomponent_model(self, skip_existing=False):
+            self.save_multicomponent_model(clip_border=clip_border)
+
+
+    def save_multicomponent_model(self, skip_existing=False, clip_border=True):
         """
-        Model image with fully separate component layers
+        Save components in HDF5 file
         """
         component_file = f'{self.root}-{self.lores_filter}_components.hdf5'
-        # if os.path.exists(comp_file):
-        #     comp_hdu = pyfits.open(comp_file)
-        #     full_mask = comp_hdu[0].data
-        # else:
-        #     full_mask = np.zeros(self.lores_im.data.shape, dtype=np.uint8)
-        #     comp_hdu = pyfits.HDUList([pyfits.PrimaryHDU(header=self.lores_im.header, data=full_mask)])
-        #     comp_hdu[0].header['EXTNAME'] = 'MASK'
             
         isly, islx = self.isly, self.islx
         self.full_mask[isly, islx] |= self.patch_mask
@@ -1702,20 +1702,25 @@ class ImageModeler(object):
         
         self.comp_hdu.open(mode='a')
         
+        if clip_border:
+            comp_ids = self.patch_ids[~self.patch_ids_in_border]
+            comp_idx = self.patch_idx[~self.patch_ids_in_border]
+        else:
+            comp_ids = self.patch_ids
+            comp_idx = self.patch_idx
+            
         for i, id in tqdm(enumerate(self.patch_ids)):
-            #extn = 'MODEL',id
-            #if (extn in self.comp_hdu):
-            #    if skip_existing:
-            #        print(f'Extension ({extn}) exists, skip.')
-            #        continue
-            #    else:
-            #        self.comp_hdu.pop(extn)
+
             if self.comp_hdu.has_id(id) & skip_existing:
                 print(f'Extension ({id}) exists, skip.')
                 continue    
-                               
-            ix = self.patch_ids == id
-            _Ai = self._A[ix,:].reshape(self.patch_shape)
+            
+            if clip_border & self.patch_ids_in_border[i]:
+                print(f'Component {id} is on the border, skip.')
+                continue
+                
+            #ix = self.patch_ids == id
+            _Ai = self._A[i,:].reshape(self.patch_shape)
 
             nonz = _Ai/_Ai.max() > 1.e-6
 
@@ -1740,7 +1745,7 @@ class ImageModeler(object):
             hdu_i.header['EXTNAME'] = 'MODEL'
             hdu_i.header['EXTVER'] = id
             hdu_i.header['NPIX'] = nonz.sum()
-
+            
             hdu_i.header['FLUX_UJY'] = (flux[i], 'Total flux density, uJy')
             #hdu_i.header['ERR_UJY'] = (err[i], 'Total flux uncertainty, uJy')
 
@@ -1771,17 +1776,13 @@ class ImageModeler(object):
                         hdu_i.header[pk] = (params[p][0], f'Galfit param {p}')
                         pk = 'GF_{0}_F'.format(p)
                         hdu_i.header[pk] = (params[p][1], 'Starred parameter')
-                        
-            #if ('MODEL',id) in self.comp_hdu:
-            #    self.comp_hdu[extn] = hdu_i
-            #else:
-            #    self.comp_hdu.append(hdu_i)
+
             self.comp_hdu.set_model(hdu_i, force=True, verbose=False, 
                                     close_file=False)
-            
-        #self.comp_hdu.writeto(component_file, overwrite=True)
+        
+        # Reopen in read mode
         self.comp_hdu.open(mode='r')
-               
+
 
     def run_full_patch(self, rd_patch=None, patch_arcmin=1.4, ds9=None, patch_id=0, mag_limit=[24,27], galfit_niter=1, galfit_flux_limit=None, match_geometry=False, refine_brightest=True, bkg_kwargs={}, run_alignment=True, galfit_kwargs={}, rescale_uncertainties=False, align_type=3, **kwargs):
         """
