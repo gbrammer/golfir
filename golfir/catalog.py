@@ -2070,8 +2070,8 @@ class FilterDetection(object):
         
         # Analyze new catalog
         to_ujy = 1./self.cat0.meta['uJy2dn'][0]
-        data = self.data/to_ujy
-        err = 1/np.sqrt(self.wdata)/to_ujy
+        data = self.data*to_ujy
+        err = 1/np.sqrt(self.wdata)*to_ujy
         err[self.wdata <= 0] = 0
         self.init_seg, self.init_cat = remove_missing_ids(self.init_seg, 
                                                         self.init_cat)
@@ -2082,7 +2082,7 @@ class FilterDetection(object):
             
         seg = self.init_seg*1
                 
-        self.new_cat = self.reanalyze_image(data, err, seg, self.init_cat)
+        self.new_cat = self.reanalyze_image(data, err, seg, self.init_cat, **kwargs)
 
         extra = []
         for i, layer in enumerate(self.new_cat['layer']):
@@ -2114,7 +2114,8 @@ class FilterDetection(object):
         self.water_cat, self.water_seg = _
         
         self.water_cat = self.reanalyze_image(data, err, 
-                                              self.water_seg, self.water_cat)
+                                              self.water_seg, self.water_cat, 
+                                              **kwargs)
         
         # remove small sources near the center of layer=2 
         layer2 = self.water_cat['layer'] == 2
@@ -2177,7 +2178,8 @@ class FilterDetection(object):
         self.water_cat, self.water_seg = _
         
         self.water_cat = self.reanalyze_image(data, err, 
-                                              self.water_seg, self.water_cat)
+                                              self.water_seg, self.water_cat, 
+                                              **kwargs)
         
         _ = remove_missing_ids(self.water_seg, self.water_cat, 
                                fill_value=0, verbose=True)
