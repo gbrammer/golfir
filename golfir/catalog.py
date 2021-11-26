@@ -1476,7 +1476,7 @@ class FilterDetection(object):
         self.det_seg = s0
     
     
-    def reanalyze_image(self, data, err, seg, cat, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], analyze_robust=2, filter_small=False, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.5):
+    def reanalyze_image(self, data, err, seg, cat, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], analyze_robust=2, filter_small=False, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.2, **kwargs):
         """
         Recompute source parameters with a new catalog / segmentation image
         
@@ -2082,7 +2082,8 @@ class FilterDetection(object):
             
         seg = self.init_seg*1
                 
-        self.new_cat = self.reanalyze_image(data, err, seg, self.init_cat, **kwargs)
+        self.new_cat = self.reanalyze_image(data, err, seg, self.init_cat, 
+                                            **kwargs)
 
         extra = []
         for i, layer in enumerate(self.new_cat['layer']):
