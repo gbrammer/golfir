@@ -1107,7 +1107,29 @@ class ImageModeler(object):
                show_date=True)
          
         self.model_bright = self._A[bright,:].T.dot(self.Anorm[bright])
+
+
+    def patch_model_err(self, minpix=5):
+        """
+        Get model uncertainties from covariance of masked design matrix `_Ax`
         
+        Notes
+        -----
+        `_Ax` attribute set in `golfir.model.ImageModeler.patch_least_squares`
+        
+        """
+        err = np.zeros(self._Ax.shape[1]) - 99
+        nz = (self._Ax > 0).sum(axis=0) > minpix
+        
+        if nz.sum() > 0:
+            dot = np.dot(self._Ax[:,nz].T, self._Ax[:,nz])
+            covar = grizli.utils.safe_invert(dot)
+            err_nz = np.sqrt(covar.diagonal())
+            err[nz] = err_nz
+
+        return err[self.Nbg:]
+
+
     def patch_least_squares(self, lsq_fitter=None, nnls_pedestal=0.5):
         """
         Least squares coeffs
@@ -1162,7 +1184,8 @@ class ImageModeler(object):
         self.patch_bkg_coeffs = _x[0][:self.Nbg]*1
         self.patch_obj_coeffs = _x[0][self.Nbg:]*1
         return _x
-        
+
+
     def compute_err_scale(self, max_sn=1):
         """
         Rescale uncertainties based on residuals
@@ -1640,8 +1663,10 @@ class ImageModeler(object):
         ################
         # Fluxes and uncertainties from the least squares fit
         flux = self.patch_obj_coeffs*1
-        covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
-        err = np.sqrt(covar.diagonal())[self.Nbg:]
+        #covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
+        #covar = grizli.utils.safe_invert(np.dot(self._Ax.T, self._Ax))
+        #err = np.sqrt(covar.diagonal())[self.Nbg:]
+        err = self.patch_model_err(minpix=5)
 
         # Clip very negative measurements
         bad = flux < min_clip*err
@@ -1683,6 +1708,64 @@ class ImageModeler(object):
         
         if multicomponent_file:
             self.save_multicomponent_model(clip_border=clip_border)
+
+
+    def set_patch_single_model(self, id, model, force=True, verbose=False):
+        """
+        Set a single component in the output file
+        """
+        isly, islx = self.isly, self.islx
+        
+        wsl = self.patch_wcs
+        
+        # Slices for subcomponent models
+        yp, xp = np.indices(self.patch_shape)
+        
+        # Open in append mode
+        self.comp_hdu.open(mode='a')
+        
+        _Ai = model*1
+        nonz = _Ai != 0
+        
+        flux_i = model.sum()
+        
+        xpm = xp[nonz]
+        ypm = yp[nonz]
+
+        # slice in patch
+        sislx = slice(xpm.min(), xpm.max())
+        sisly = slice(ypm.min(), ypm.max())
+        
+        # global slice
+        fislx = slice(sislx.start + islx.start, sislx.stop + islx.start)
+        fisly = slice(sisly.start + isly.start, sisly.stop + isly.start)
+
+        sub_wcs = self.lores_wcs.slice((fisly, fislx))
+        sub_head = grizli.utils.to_header(sub_wcs)
+
+        hdu_i = pyfits.ImageHDU(data=(_Ai*nonz)[sisly, sislx],
+                                header=sub_head)
+
+        hdu_i.header['ID'] = (id, 'Object ID number')
+        hdu_i.header['EXTNAME'] = 'MODEL'
+        hdu_i.header['EXTVER'] = id
+        hdu_i.header['NPIX'] = nonz.sum()
+        
+        hdu_i.header['FLUX_UJY'] = (flux_i, 'Total flux density, uJy')
+        #hdu_i.header['ERR_UJY'] = (err[i], 'Total flux uncertainty, uJy')
+
+        hdu_i.header['XMIN'] = (sislx.start + islx.start, 'x slice min')
+        hdu_i.header['XMAX'] = (sislx.stop + islx.start, 'x slice max')
+        hdu_i.header['YMIN'] = (sisly.start + isly.start, 'y slice min')
+        hdu_i.header['YMAX'] = (sisly.stop + isly.start, 'y slice max')
+            
+        hdu_i.header['GALFIT'] = (False, 'Model is from Galfit')
+
+        self.comp_hdu.set_model(hdu_i, force=force, verbose=verbose, 
+                                    close_file=False)
+        
+        # Reopen in read mode
+        self.comp_hdu.open(mode='r')
 
 
     def save_multicomponent_model(self, skip_existing=False, clip_border=True):
@@ -1841,8 +1924,9 @@ class ImageModeler(object):
             else:
                 # If galfit_flux_limit < 0, then take as S/N limit
                 flux = self.patch_obj_coeffs*1
-                covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
-                err = np.sqrt(covar.diagonal())[self.Nbg:]
+                #covar = np.matrix(np.dot(self._Ax.T, self._Ax)).I.A
+                #err = np.sqrt(covar.diagonal())[self.Nbg:]
+                err = self.patch_model_err(minpix=5)
                 fit_bright = (flux/err > -galfit_flux_limit) & (err > 0)
                 
             #fit_bright &= (~self.patch_ids_in_border)
@@ -2046,8 +2130,29 @@ class ImageModeler(object):
         Returns
         =======
         
-        (ap_flux, ap_err, ap_flag, model_flux, model_sum), fig
-             
+        (fluxes), fig : scalar or arrays, figure
+            
+            Fluxes: 
+            
+                `ap_flux` = flux within the aperture after subtracting 
+                          additional components
+                
+                `ap_err`  = uncertainty within that aperture
+                
+                `ap_flag` = flags within the aperture
+                
+                `model_flux` = aperture sum of the object model
+                
+                `model_sum` = total flux of the object model
+                
+                `contam_flux` = aperture flux of the global model + bg, less
+                              the object model
+                
+                `full_bg` = aperture flux of just the background component of
+                          the global model
+            
+            The returned values are scalars or arrays matching the
+            specified `aper_radius`.
         """
         
         import sep
