@@ -36,7 +36,8 @@ phot_args = {'aper_segmask': True,
              'run_detection': True,
              'threshold': 1.0,
              'use_bkg_err': False,
-             'use_psf_filter': True}
+             'use_psf_filter': True, 
+             'phot_apertures': prep.SEXTRACTOR_PHOT_APERTURES_ARCSEC}
 
 
 def show_seg(seg, ds9, header=None, seed=1):
@@ -148,7 +149,7 @@ def match_catalog_layers(c0, c1, grow_radius=5, max_offset=5, low_layer=0, make_
                    color='g', marker='.', alpha=0.6)
 
 
-def analyze_image(data, err, seg, tab, det_data=None, athresh=3., 
+def analyze_image(data, err, seg, tab, athresh=3., 
                   robust=False, prefix='', suffix='', grow=1, 
                   subtract_background=False, include_empty=False, 
                   pad=0, dilate=0, make_image_cols=True):
@@ -631,6 +632,31 @@ def get_seg_limits(seg, intensity_image=None, properties=['label','bbox','area']
     return tab
 
 
+def patch_ellipse_from_catalog(x, y, a, b, theta, **kwargs):
+    """
+    Make a `matplotlib.patches.Ellipse` patch from SourceExtractor
+    parameters
+    """
+    from matplotlib.patches import Ellipse
+    
+    ell = Ellipse((x, y), a, b, angle=theta/np.pi*180, **kwargs)
+    return ell
+    
+    
+def shapely_ellipse_from_catalog(x, y, a, b, theta):
+    """
+    Make a `shapely.geometry.Polygon` patch from SourceExtractor
+    parameters
+    """
+    from shapely.geometry import Point
+    import shapely.affinity
+    
+    circ = Point([x,y]).buffer(1)
+    ell = shapely.affinity.scale(circ, a/2, b/2)
+    ellr = shapely.affinity.rotate(ell, theta/np.pi*180)
+    return ellr
+
+
 def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w'], optical_kernel_sigma=1.3, scale_keyword='fnu', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, **kwargs):
     """
     Make combined detection image for a given field
@@ -1105,7 +1131,7 @@ class FilterDetection(object):
             keep = np.zeros(len(so), dtype=bool)
         
             for i in range(len(so)):
-                p_i = self._shapely_ellipse_from_catalog(x[i], y[i], 
+                p_i = shapely_ellipse_from_catalog(x[i], y[i], 
                                                     a[i], b[i], th[i])
             
                 if i == 0:
@@ -1476,7 +1502,8 @@ class FilterDetection(object):
         self.det_seg = s0
     
     
-    def reanalyze_image(self, data, err, seg, cat, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], analyze_robust=2, filter_small=False, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.2, **kwargs):
+    @staticmethod
+    def reanalyze_image(data, err, seg, cat, data_bkg=None, ZP=23.9, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], min_a=0.35, analyze_robust=2, filter_small=False, filter_image=None, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.2, verbose=True, **kwargs):
         """
         Recompute source parameters with a new catalog / segmentation image
         
@@ -1496,22 +1523,41 @@ class FilterDetection(object):
         
         autoparams, flux_radii : list
             Parameters for `AUTO` / `KRON` attributes
+        
+        min_a : float
+            Remove sources with semimajor axis smaller than this threshold
+            `a_image < min_a`
             
+        analyze_robust : int
+            "Robust" analysis (see `golfir.catalog.analyze_image`)
+        
+        filter_small, filter_image : bool, array-like
+            Measure parameters for `layer=0` sources on `data - filter_image`
+            filtered  data.
+        
+        verbose : bool
+           Print messages
+           
         Returns
         -------
         new : `astropy.table.Table`
             Table with new source parameters (e.g, xmin, xmax, a_image, etc)
         
+        seg : array-like
+            New segmentation image cleaned of missing sources in `new` table
+            
         Notes
         -----
         Output `new` table may not have same size as input `cat`, missing 
         sources where the analysis failed
             
         """
-        if filter_small:
-            new = analyze_image(data - self.filtered[1], 
+        if data_bkg is None:
+            data_bkg = data
+            
+        if filter_small & ('layer' in cat.colnames):
+            new = analyze_image(data - filter_image, 
                                 err, seg, cat,
-                                det_data=None,
                                 athresh=analyze_thresh, 
                                 robust=analyze_robust,
                                 prefix='', suffix='', grow=0, 
@@ -1524,7 +1570,7 @@ class FilterDetection(object):
             big = cat['layer'] > 0
             new2 = analyze_image(data, 
                                  err, seg, cat[big],
-                                 det_data=None, athresh=analyze_thresh, 
+                                 athresh=analyze_thresh, 
                                  robust=analyze_robust,
                                  prefix='', suffix='', grow=0, 
                                  subtract_background=False, 
@@ -1537,9 +1583,9 @@ class FilterDetection(object):
                 new[k][big] = new2[k]
             
         else:
-            new = analyze_image(data, 
+            new = analyze_image(data_bkg, 
                             err, seg, cat,
-                            det_data=None, athresh=analyze_thresh, 
+                            athresh=analyze_thresh, 
                             robust=analyze_robust,
                             prefix='', suffix='', grow=0, 
                             subtract_background=False, include_empty=False, 
@@ -1547,11 +1593,21 @@ class FilterDetection(object):
                             dilate=analyze_dilate,
                             make_image_cols=True)
                     
-        new.meta['FILTERSM'] = filter_small, 'Analysis on small layers with cleaned'
-        ok = np.isfinite(new['x_image']) & (new['x_image'] > 1.0)
-        ok &= new['a_image'] > 0.35
+        new.meta['FILTERSM'] = (filter_small,
+                                'Layer 0 analysis on filtered image')
         
-        new = new[ok]
+        sh = data.shape
+        ok_x = (new['x_image'] > 1.0) & (new['x_image'] < sh[1])
+        ok_x &= (new['y_image'] > 1.0) & (new['y_image'] < sh[0])
+        ok_x &= np.isfinite(new['x_image']) & np.isfinite(new['y_image'])
+        
+        big_enough = new['a_image'] > min_a
+        if verbose:
+            print(f'Remove {(~ok_x).sum()} bad centroids, '
+                  f'{(~big_enough).sum()} too small')
+
+        new = new[ok_x & big_enough]            
+
         
         new_ids = new['id']
         cat_ids = cat['id']
@@ -1575,11 +1631,11 @@ class FilterDetection(object):
             new[k] = snew[k]
         
         # metadata
-        for k in self.cat0.meta:
-            new.meta[k] = self.cat0.meta[k]
+        for k in cat.meta:
+            new.meta[k] = cat.meta[k]
             
         ### auto params
-        auto = prep.compute_SEP_auto_params(data, data, err <= 0,
+        auto = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
                                         pixel_scale=0.1,
                                         err=err, segmap=seg, tab=new,
                                         autoparams=autoparams, 
@@ -1592,9 +1648,9 @@ class FilterDetection(object):
         for k in auto.meta:
             new.meta[k] = auto.meta[k]
         
-        new['mag_auto'] = self.cat0.meta['ZP'][0] - 2.5*np.log10(new['flux_auto'])
+        new['mag_auto'] = ZP - 2.5*np.log10(new['flux_auto'])
         
-        return new
+        return new, seg
 
 
     def find_starjunk(self, seg, cat, flux_threshold=0.1, mag_to_size=(lambda mag: np.maximum(19-mag, 0)*0.7), star_mag_limit=19, stardef=[np.array([10, 16, 17, 18, 19, 20, 21, 23])-2.5, [10, 10, 5, 3.2, 2.1, 1.7, 1.7, 1.7]], **kwargs):
@@ -1863,21 +1919,22 @@ class FilterDetection(object):
                      self.water_seg, upper['NUMBER'])
         
         # Apertures on detection image for aper corrections
-        det_tab = prep.make_SEP_catalog(root=f'{self.root}-{self.filter}',
+        det_aper = prep.make_SEP_catalog(root=f'{self.root}-{self.filter}',
                   threshold=phot_args['threshold'],
                   rescale_weight=False,
                   err_scale=False,
                   get_background=False,
+                  phot_apertures=phot_args['phot_apertures'],
                   save_to_fits=False, source_xy=source_xy,
                   bkg_mask=None,
                   bkg_params=phot_args['bkg_params'],
                   use_bkg_err=phot_args['use_bkg_err'])
         
-        for k in det_tab.colnames:
-            upper[k] = det_tab[k]
+        for k in det_aper.colnames:
+            upper[k] = det_aper[k]
         
-        for k in det_tab.meta:
-            upper.meta[k] = det_tab.meta[k]
+        for k in det_aper.meta:
+            upper.meta[k] = det_aper.meta[k]
         
         # Write catalog    
         upper.write(f'{self.root}-{self.filter}.cat.fits', overwrite=True)
@@ -1928,7 +1985,7 @@ class FilterDetection(object):
         cat['p_ix'] = -1
         
         for i in pa:
-            ellp = self._patch_ellipse_from_catalog(x[i], y[i], 
+            ellp = patch_ellipse_from_catalog(x[i], y[i], 
                                                a[i], b[i], th[i], 
                                                color='orange', alpha=0.4)
                                                
@@ -1939,12 +1996,12 @@ class FilterDetection(object):
                 if make_plot:
                     ax.add_patch(ellp)
                     
-                pi = self._shapely_ellipse_from_catalog(x[i], y[i], 
+                pi = shapely_ellipse_from_catalog(x[i], y[i], 
                                                    a[i], b[i], th[i])
                 for j in np.where(in_p)[0]:
                     if verbose:
                         print(f'  child {j}')
-                    pj = self._shapely_ellipse_from_catalog(x[j], y[j], 
+                    pj = shapely_ellipse_from_catalog(x[j], y[j], 
                                                        a[j], b[j], th[j])
                     
                     if pj.intersection(pi).area/pj.area > overlap_threshold:
@@ -2002,24 +2059,7 @@ class FilterDetection(object):
         
         return cat[~remove]
 
-    @staticmethod
-    def _patch_ellipse_from_catalog(x, y, a, b, theta, **kwargs):
-        from matplotlib.patches import Ellipse
-        
-        ell = Ellipse((x, y), a, b, angle=theta/np.pi*180, **kwargs)
-        return ell
-        
-        
-    @staticmethod    
-    def _shapely_ellipse_from_catalog(x, y, a, b, theta):
-        from shapely.geometry import Point
-        import shapely.affinity
-        
-        circ = Point([x,y]).buffer(1)
-        ell = shapely.affinity.scale(circ, a/2, b/2)
-        ellr = shapely.affinity.rotate(ell, theta/np.pi*180)
-        return ellr
-        
+
     def pipeline(self, watershed_thresholds=[0.3, 1.8], run_remove_subcomponents=False, **kwargs):
         """
         Run the whole thing. 
@@ -2027,6 +2067,8 @@ class FilterDetection(object):
         frame = inspect.currentframe()
         utils.log_function_arguments(self.logfile, frame, 
                                     func='FilterDetection.pipeline')
+        
+        import sep
         
         self.watershed_thresholds = watershed_thresholds
         
@@ -2081,9 +2123,22 @@ class FilterDetection(object):
             self.init_cat[k] = xlim[k]
             
         seg = self.init_seg*1
-                
-        self.new_cat = self.reanalyze_image(data, err, seg, self.init_cat, 
-                                            **kwargs)
+        
+        # Photometry background
+        bw = phot_args['bkg_params']['bw']
+        fw = phot_args['bkg_params']['fw']
+
+        bkg = sep.Background(data, mask=(err <= 0), bw=bw, bh=bw,
+                             fw=fw, fh=fw)
+        data_bkg = data - bkg.back()
+        
+        
+        self.new_cat, seg = self.reanalyze_image(data, err, seg, 
+                                                self.init_cat,
+                                                data_bkg=data_bkg,
+                                                filter_image=self.filtered[1],
+                                                ZP=23.9,
+                                                **kwargs)
 
         extra = []
         for i, layer in enumerate(self.new_cat['layer']):
@@ -2114,8 +2169,11 @@ class FilterDetection(object):
         _ = self.watershed_segmentation(self.clean_cat, **kwargs)
         self.water_cat, self.water_seg = _
         
-        self.water_cat = self.reanalyze_image(data, err, 
+        self.water_cat, self.water_seg = self.reanalyze_image(data, err, 
                                               self.water_seg, self.water_cat, 
+                                              data_bkg=data_bkg,
+                                              filter_image=self.filtered[1],
+                                              ZP=23.9,
                                               **kwargs)
         
         # remove small sources near the center of layer=2 
@@ -2145,7 +2203,7 @@ class FilterDetection(object):
                               f'{self.root}-{self.filter}_xtrim.reg',
                                       use_world=False, scale_major=3,
                                       use_ellipse=True, 
-                                      extra=[extra[i] for i in np.where(~keep)[0]])
+                              extra=[extra[i] for i in np.where(~keep)[0]])
         
         prep.table_to_regions(self.water_cat[keep],
                               f'{self.root}-{self.filter}_trim.reg',
@@ -2178,8 +2236,11 @@ class FilterDetection(object):
         _ = self.watershed_segmentation(self.water_cat, **kwargs)
         self.water_cat, self.water_seg = _
         
-        self.water_cat = self.reanalyze_image(data, err, 
+        self.water_cat, self.water_seg = self.reanalyze_image(data, err, 
                                               self.water_seg, self.water_cat, 
+                                              data_bkg=data_bkg,
+                                              filter_image=self.filtered[1],
+                                              ZP=23.9,
                                               **kwargs)
         
         _ = remove_missing_ids(self.water_seg, self.water_cat, 
