@@ -150,7 +150,8 @@ def match_catalog_layers(c0, c1, grow_radius=5, max_offset=5, low_layer=0, make_
 
 
 def analyze_image(data, err, seg, tab, athresh=3., 
-                  robust=False, prefix='', suffix='', grow=1, 
+                  robust=False, allow_recenter=False, 
+                  prefix='', suffix='', grow=1, 
                   subtract_background=False, include_empty=False, 
                   pad=0, dilate=0, make_image_cols=True):
     """
@@ -202,10 +203,16 @@ def analyze_image(data, err, seg, tab, athresh=3.,
     new[idcol] = tab[idcol]
     
     for k in ['x','y','x2','y2','xy','a','b','theta','peak','flux','background']:
-        new[k] = np.zeros(len(tab), dtype=np.float32)
+        if k in tab.colnames:
+            new[k] = tab[k].copy()
+        else:
+            new[k] = np.zeros(len(tab), dtype=np.float32)
     
     for k in ['xpeak','ypeak','npix','flag']:
-        new[k] = np.zeros(len(tab), dtype=int)
+        if k in tab.colnames:
+            new[k] = tab[k].copy()
+        else:
+            new[k] = np.zeros(len(tab), dtype=int)
         
     for id_i in tqdm(ids):
         ix = np.where(tab[idcol] == id_i)[0][0]
@@ -323,8 +330,13 @@ def analyze_image(data, err, seg, tab, athresh=3.,
                 flag = False
             
             if flag | (robust > 1):
-                xn = tab['x'][ix]-xmin
-                yn = tab['y'][ix]-ymin
+                if allow_recenter:
+                    xn = xm
+                    yn = ym
+                else:
+                    xn = tab['x'][ix]-xmin
+                    yn = tab['y'][ix]-ymin
+                
                 xm2 = mx2 / rv + xn*xn - 2*xm*xn
                 ym2 = my2 / rv + yn*yn - 2*ym*yn
                 xym = mxy / rv + xn*yn - xm*yn - xn*ym
@@ -657,7 +669,7 @@ def shapely_ellipse_from_catalog(x, y, a, b, theta):
     return ellr
 
 
-def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w'], optical_kernel_sigma=1.3, scale_keyword='fnu', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, **kwargs):
+def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w','f850lp'], optical_kernel_sigma=1.3, scale_keyword='PHOTFLAM', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, **kwargs):
     """
     Make combined detection image for a given field
     """
@@ -1503,7 +1515,7 @@ class FilterDetection(object):
     
     
     @staticmethod
-    def reanalyze_image(data, err, seg, cat, data_bkg=None, ZP=23.9, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], min_a=0.35, analyze_robust=2, filter_small=False, filter_image=None, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.2, verbose=True, **kwargs):
+    def reanalyze_image(data, err, seg, cat, data_bkg=None, ZP=23.9, autoparams=[2.5, 0.35*u.arcsec, 0, 5], flux_radii=[0.2, 0.5, 0.9], min_a=0.35, analyze_robust=2, analyze_recenter=False, pixel_scale=0.1, filter_small=False, filter_image=None, analyze_dilate=0, analyze_pad=0, analyze_thresh=1.2, verbose=True, remove_failed=True, **kwargs):
         """
         Recompute source parameters with a new catalog / segmentation image
         
@@ -1560,6 +1572,7 @@ class FilterDetection(object):
                                 err, seg, cat,
                                 athresh=analyze_thresh, 
                                 robust=analyze_robust,
+                                allow_recenter=analyze_recenter,
                                 prefix='', suffix='', grow=0, 
                                 subtract_background=False, 
                                 include_empty=False, 
@@ -1572,6 +1585,7 @@ class FilterDetection(object):
                                  err, seg, cat[big],
                                  athresh=analyze_thresh, 
                                  robust=analyze_robust,
+                                 allow_recenter=analyze_recenter,
                                  prefix='', suffix='', grow=0, 
                                  subtract_background=False, 
                                  include_empty=False, 
@@ -1587,6 +1601,7 @@ class FilterDetection(object):
                             err, seg, cat,
                             athresh=analyze_thresh, 
                             robust=analyze_robust,
+                            allow_recenter=analyze_recenter,
                             prefix='', suffix='', grow=0, 
                             subtract_background=False, include_empty=False, 
                             pad=analyze_pad,
@@ -1606,29 +1621,33 @@ class FilterDetection(object):
             print(f'Remove {(~ok_x).sum()} bad centroids, '
                   f'{(~big_enough).sum()} too small')
 
-        new = new[ok_x & big_enough]            
-
+        valid = ok_x & big_enough
+        #new = new[ok_x & big_enough]            
         
         new_ids = new['id']
         cat_ids = cat['id']
-        ix_new = np.array([np.where(cat_ids == n)[0][0] for n in new_ids])
-        cat['failed'] = True
-        cat['failed'][ix_new] = False
+        #ix_new = np.array([np.where(cat_ids == n)[0][0] for n in new_ids])
+        #cat['failed'] = (~valid)
+        #cat['failed'][ix_new] = False
         
         for k in ['number','ra','dec','layer']:
-            new[k] = cat[k][~cat['failed']]
+            new[k] = cat[k]#[~cat['failed']]
 
         #cat['failed'] = ~ok
         
         #switch_segments(seg, cat[cat['failed']], cat['id'][~ok]*0)
-        seg, new = remove_missing_ids(seg, new)
+        new['ix'] = np.arange(len(new))
+        seg, clean = remove_missing_ids(seg, new[valid])
+        new['failed'] = True
+        new['failed'][clean['ix']] = False
         
         snew = get_seg_limits(seg)
         for k in snew.colnames:
             if k in ['id']:
                 continue
-
-            new[k] = snew[k]
+            
+            new[k] = snew[k][0]
+            new[k][clean['ix']] = snew[k]
         
         # metadata
         for k in cat.meta:
@@ -1636,20 +1655,25 @@ class FilterDetection(object):
             
         ### auto params
         auto = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
-                                        pixel_scale=0.1,
-                                        err=err, segmap=seg, tab=new,
+                                        pixel_scale=pixel_scale,
+                                        err=err, segmap=seg,
+                                        tab=new[clean['ix']],
                                         autoparams=autoparams, 
                                         flux_radii=flux_radii,
                                         subpix=0, verbose=True)
         
         for k in auto.colnames:
-             new[k] = auto[k]
+            new[k] = auto[k][0]*0
+            new[k][clean['ix']] = auto[k]
 
         for k in auto.meta:
             new.meta[k] = auto.meta[k]
         
         new['mag_auto'] = ZP - 2.5*np.log10(new['flux_auto'])
         
+        if remove_failed:
+            new = new[~new['failed']]
+            
         return new, seg
 
 
@@ -2131,7 +2155,6 @@ class FilterDetection(object):
         bkg = sep.Background(data, mask=(err <= 0), bw=bw, bh=bw,
                              fw=fw, fh=fw)
         data_bkg = data - bkg.back()
-        
         
         self.new_cat, seg = self.reanalyze_image(data, err, seg, 
                                                 self.init_cat,
