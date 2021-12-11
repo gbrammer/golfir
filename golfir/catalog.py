@@ -24,10 +24,10 @@ from tqdm import tqdm
 
 phot_args = {'aper_segmask': True,
              'bkg_mask': None,
-             'bkg_params': {'bh': 64, 'bw': 64, 
-                            'fh': 3, 'fw': 3, 'pixel_scale': 0.06},
+             'bkg_params': {'bh': 32, 'bw': 32, 
+                            'fh': 5, 'fw': 5, 'pixel_scale': 0.1},
              'detection_background': True,
-             'detection_filter': 'ir',
+             'detection_filter': 'det',
              'detection_root': None,
              'get_all_filters': False,
              'output_root': None,
@@ -38,6 +38,59 @@ phot_args = {'aper_segmask': True,
              'use_bkg_err': False,
              'use_psf_filter': True, 
              'phot_apertures': prep.SEXTRACTOR_PHOT_APERTURES_ARCSEC}
+
+
+GAUSSIAN_KERNEL = np.array([
+[0.0049, 0.0213, 0.0513, 0.0687, 0.0513, 0.0213, 0.0049],
+[0.0213, 0.0921, 0.2211, 0.296 , 0.2211, 0.0921, 0.0213],
+[0.0513, 0.2211, 0.5307, 0.7105, 0.5307, 0.2211, 0.0513],
+[0.0687, 0.296 , 0.7105, 0.9511, 0.7105, 0.296 , 0.0687],
+[0.0513, 0.2211, 0.5307, 0.7105, 0.5307, 0.2211, 0.0513],
+[0.0213, 0.0921, 0.2211, 0.296 , 0.2211, 0.0921, 0.0213],
+[0.0049, 0.0213, 0.0513, 0.0687, 0.0513, 0.0213, 0.0049]])
+
+F160W_KERNEL = np.array([
+       [0.00036306, 0.0007211 , 0.0006885 , 0.00051918, 0.00060595,
+        0.00044273, 0.00041596, 0.00042298, 0.0005109 , 0.0004347 ,
+        0.00034758],
+       [0.00049801, 0.00045392, 0.00043181, 0.00053092, 0.00097037,
+        0.00124018, 0.00116621, 0.00075295, 0.00043989, 0.0004214 ,
+        0.00075579],
+       [0.00053497, 0.00041625, 0.00083392, 0.00219883, 0.00660488,
+        0.00857547, 0.00503033, 0.00212257, 0.00075933, 0.00041211,
+        0.00084069],
+       [0.00043234, 0.00058102, 0.00164972, 0.00746829, 0.01723461,
+        0.02033997, 0.01402212, 0.00828142, 0.00226408, 0.00056408,
+        0.00080164],
+       [0.00047637, 0.00072479, 0.00393787, 0.01261413, 0.03511766,
+        0.07984465, 0.04050749, 0.01689382, 0.00597891, 0.00085294,
+        0.00081502],
+       [0.00054993, 0.00089698, 0.00678479, 0.01839382, 0.07425842,
+        0.17333734, 0.07481   , 0.01872553, 0.00749245, 0.00089873,
+        0.00055303],
+       [0.00082199, 0.000887  , 0.00609313, 0.01695003, 0.04005031,
+        0.07847298, 0.03627246, 0.0134794 , 0.00416312, 0.00083321,
+        0.00047439],
+       [0.0007945 , 0.00056122, 0.00236797, 0.00823446, 0.01374953,
+        0.01950207, 0.0165822 , 0.00759804, 0.0017611 , 0.00061746,
+        0.0004295 ],
+       [0.0008201 , 0.00040671, 0.00073257, 0.00211902, 0.00480665,
+        0.00771078, 0.00646757, 0.00208035, 0.0008136 , 0.00042777,
+        0.00055984],
+       [0.00076636, 0.00042482, 0.00044357, 0.00070887, 0.00106409,
+        0.00114229, 0.00095213, 0.00050255, 0.00040967, 0.000425  ,
+        0.00048569],
+       [0.00035023, 0.00045955, 0.00051846, 0.00040028, 0.00039116,
+        0.00045092, 0.00060395, 0.00052881, 0.00072058, 0.00070227,
+        0.00034031]])
+        
+detection_params = {'minarea': 5, 
+                    'filter_kernel': F160W_KERNEL, 
+                    'filter_type': 'conv', 
+                    'clean': False, 
+                    'clean_param': 1,
+                    'deblend_nthresh': 32,
+                    'deblend_cont': 1.e-4}
 
 
 def show_seg(seg, ds9, header=None, seed=1):
@@ -964,28 +1017,16 @@ class FilterDetection(object):
                        header=self.header, overwrite=True)
         
         ### Run detection
-        bkg_params={'bw': 64, 'bh': 64, 'fw': 3, 'fh': 3}
-
-        detection_params = {'minarea': 7, 
-                            'filter_kernel': np.array([
-               [0.0049, 0.0213, 0.0513, 0.0687, 0.0513, 0.0213, 0.0049],
-               [0.0213, 0.0921, 0.2211, 0.296 , 0.2211, 0.0921, 0.0213],
-               [0.0513, 0.2211, 0.5307, 0.7105, 0.5307, 0.2211, 0.0513],
-               [0.0687, 0.296 , 0.7105, 0.9511, 0.7105, 0.296 , 0.0687],
-               [0.0513, 0.2211, 0.5307, 0.7105, 0.5307, 0.2211, 0.0513],
-               [0.0213, 0.0921, 0.2211, 0.296 , 0.2211, 0.0921, 0.0213],
-               [0.0049, 0.0213, 0.0513, 0.0687, 0.0513, 0.0213, 0.0049]]), 
-                            'filter_type': 'conv', 
-                            'clean': False, 
-                            'clean_param': 1,
-                            'deblend_nthresh': 32, 'deblend_cont': 1.e-6}
-
+        #bkg_params={'bw': 64, 'bh': 64, 'fw': 3, 'fh': 3}
+        bkg_params = phot_args['bkg_params']
+        
         args = dict(detection_params=detection_params,
-                    bkg_params=bkg_params, 
+                    bkg_params=phot_args['bkg_params'], 
                     get_background=get_background,
                     column_case=str.lower,
                     err_scale=-np.inf,
-                    pixel_scale=0.10, rescale_weight=True)
+                    pixel_scale=0.10, rescale_weight=True,
+                    phot_apertures=phot_args['phot_apertures'])
         
         ## First step: data - filter1
         args['rescale_weight'] = True
@@ -1652,7 +1693,20 @@ class FilterDetection(object):
         # metadata
         for k in cat.meta:
             new.meta[k] = cat.meta[k]
-            
+        
+        ### ISO fluxes (flux within segments)
+        iso_flux, iso_fluxerr, iso_area = prep.get_seg_iso_flux(data_bkg, seg, 
+                                                 new[clean['ix']],
+                                                 err=err, verbose=1)
+
+        new['flux_iso'] = iso_flux[0]*0
+        new['fluxerr_iso'] = iso_fluxerr[0]*0
+        new['area_iso'] = iso_area[0]*0
+        
+        new['flux_iso'][clean['ix']] = iso_flux
+        new['fluxerr_iso'][clean['ix']] = iso_fluxerr
+        new['area_iso'][clean['ix']] = iso_area
+        
         ### auto params
         auto = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
                                         pixel_scale=pixel_scale,
@@ -1661,7 +1715,7 @@ class FilterDetection(object):
                                         autoparams=autoparams, 
                                         flux_radii=flux_radii,
                                         subpix=0, verbose=True)
-        
+                
         for k in auto.colnames:
             new[k] = auto[k][0]*0
             new[k][clean['ix']] = auto[k]
