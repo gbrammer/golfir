@@ -1773,7 +1773,10 @@ class FilterDetection(object):
         
         star = (cat['mag_auto'] < star_mag_limit) 
         star &= (cat['flux_radius'] < ylim)
-
+        
+        if star.sum() == 0:
+            return seg, cat
+            
         ix, dr = cat[star].match_to_catalog_sky(cat)
         near_star = (dr.value < mag_to_size(cat['mag_auto'][star][ix]))
         near_star &= (dr.value > 0)
@@ -2138,7 +2141,7 @@ class FilterDetection(object):
         return cat[~remove]
 
 
-    def pipeline(self, watershed_thresholds=[0.3, 1.8], run_remove_subcomponents=False, **kwargs):
+    def pipeline(self, watershed_thresholds=[0.3, 1.8], run_remove_subcomponents=False, clean_junk=True, **kwargs):
         """
         Run the whole thing. 
         """
@@ -2233,12 +2236,16 @@ class FilterDetection(object):
                                       extra=extra)
 
         # Remove starjunk
-        utils.log_comment(self.logfile, 'Remove starjunk', 
+        if clean_junk:
+            utils.log_comment(self.logfile, 'Remove starjunk', 
                           verbose=True, show_date=True)
                           
-        self.clean_seg, self.clean_cat = self.find_starjunk(seg, self.new_cat, 
+            self.clean_seg, self.clean_cat = self.find_starjunk(seg, 
+                                                            self.new_cat, 
                                                             **kwargs)
-        
+        else:
+            self.clean_seg, self.clean_cat = seg, self.new_cat
+            
         # Watershed segmentation
         utils.log_comment(self.logfile, 'Watershed segmentation', 
                           verbose=True, show_date=True)
