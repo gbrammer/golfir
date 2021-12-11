@@ -6,6 +6,7 @@ Pipeline for generating new image segmentation
 import os
 import inspect
 import glob
+import copy
 
 import numpy as np
 import scipy.ndimage as nd
@@ -928,6 +929,7 @@ class FilterDetection(object):
         
         self.header = self.im[0].header
         self.wcs = pywcs.WCS(self.header)
+        self.pixel_scale = utils.get_wcs_pscale(self.wcs)
         
         self.sh = self.im[0].data.shape
         
@@ -1020,13 +1022,13 @@ class FilterDetection(object):
         #bkg_params={'bw': 64, 'bh': 64, 'fw': 3, 'fh': 3}
         bkg_params = phot_args['bkg_params']
         
-        args = dict(detection_params=detection_params,
-                    bkg_params=phot_args['bkg_params'], 
+        args = dict(detection_params=copy.deepcopy(detection_params),
+                    bkg_params=copy.copy(phot_args['bkg_params']), 
                     get_background=get_background,
                     column_case=str.lower,
                     err_scale=-np.inf,
-                    pixel_scale=0.10, rescale_weight=True,
-                    phot_apertures=phot_args['phot_apertures'])
+                    pixel_scale=self.pixel_scale, rescale_weight=True,
+                    phot_apertures=copy.copy(phot_args['phot_apertures']))
         
         ## First step: data - filter1
         args['rescale_weight'] = True
@@ -1818,7 +1820,7 @@ class FilterDetection(object):
         #self.clean_cat = new
 
 
-    def watershed_segmentation(self, cat, expand_smallest=1, **kwargs):
+    def watershed_segmentation(self, cat, small_circle=6, expand_smallest=1, **kwargs):
         """
         Watershed segmentation of sources layered catalogs
         
@@ -1863,13 +1865,13 @@ class FilterDetection(object):
         
         #m0 = expand_labels(markers, distance=expand_smallest)
         # little circle
-        fp = circle_footprint(scale=6, shrink=0.8)
+        fp = circle_footprint(scale=small_circle, shrink=0.8)
         mx = markers + 1e8*(markers == 0)
         mi = nd.minimum_filter(mx, footprint=fp)
         m0 = mi * (mi < 1e7)
         
         seg = watershed(-fdata, markers, 
-                       mask=(sn >= 1.))
+                        mask=(sn >= 1.))
         
         seg[m0 > 0] = m0[m0 > 0]
         
@@ -2004,7 +2006,7 @@ class FilterDetection(object):
                   threshold=phot_args['threshold'],
                   rescale_weight=False,
                   err_scale=False,
-                  get_background=False,
+                  get_background=True,
                   phot_apertures=phot_args['phot_apertures'],
                   save_to_fits=False, source_xy=source_xy,
                   bkg_mask=None,
@@ -2218,6 +2220,7 @@ class FilterDetection(object):
                                                 data_bkg=data_bkg,
                                                 filter_image=self.filtered[1],
                                                 ZP=23.9,
+                                                pixel_scale=self.pixel_scale,
                                                 **kwargs)
 
         extra = []
@@ -2258,6 +2261,7 @@ class FilterDetection(object):
                                               data_bkg=data_bkg,
                                               filter_image=self.filtered[1],
                                               ZP=23.9,
+                                              pixel_scale=self.pixel_scale,
                                               **kwargs)
         
         # remove small sources near the center of layer=2 
@@ -2325,6 +2329,7 @@ class FilterDetection(object):
                                               data_bkg=data_bkg,
                                               filter_image=self.filtered[1],
                                               ZP=23.9,
+                                              pixel_scale=self.pixel_scale,
                                               **kwargs)
         
         _ = remove_missing_ids(self.water_seg, self.water_cat, 
