@@ -747,11 +747,14 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
     
     is_psf_match = False
     
-    if os.path.exists('psf_kernel_f814w_f160w_50mas.fits'):
-        msg = 'Use PSF-matching kernel psf_kernel_f814w_f160w_50mas.fits'
+    hst_kernel_file = os.path.join(os.path.dirname(__file__),
+                                   'data/psf_kernel_f814w_f160w_50mas.fits')
+                                   
+    if os.path.exists(hst_kernel_file):
+        msg = f'Use PSF-matching kernel {hst_kernel_file}'
         utils.log_comment(logfile, msg, verbose=True)
         
-        imk = pyfits.open('psf_kernel_f814w_f160w_50mas.fits')
+        imk = pyfits.open(hst_kernel_file)
         kernel = imk[0].data #/ imk[0].data.max()
         kernel = np.pad(kernel, pad_width=(0,1))
         is_psf_match = True
