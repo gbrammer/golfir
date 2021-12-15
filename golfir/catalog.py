@@ -748,7 +748,7 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
     is_psf_match = False
     
     hst_kernel_file = os.path.join(os.path.dirname(__file__),
-                                   'data/psf_kernel_f814w_f160w_50mas.fits')
+                                'data/psf/psf_kernel_f814w_f160w_50mas.fits')
                                    
     if os.path.exists(hst_kernel_file):
         msg = f'Use PSF-matching kernel {hst_kernel_file}'
