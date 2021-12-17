@@ -91,7 +91,7 @@ detection_params = {'minarea': 5,
                     'clean': False, 
                     'clean_param': 1,
                     'deblend_nthresh': 32,
-                    'deblend_cont': 1.e-4}
+                    'deblend_cont': 1.e-5}
 
 
 def show_seg(seg, ds9, header=None, seed=1):
@@ -1005,9 +1005,9 @@ class FilterDetection(object):
                        data=self.filtered[0]-self.filtered[1],
                        header=self.header, overwrite=True)
         
-        pyfits.writeto(f'{self.root}-{self.filter}-2_drz_sci.fits', 
-                       data=self.filtered[1],
-                       header=self.header, overwrite=True)
+        # pyfits.writeto(f'{self.root}-{self.filter}-2_drz_sci.fits', 
+        #                data=self.filtered[1],
+        #                header=self.header, overwrite=True)
         
         pyfits.writeto(f'{self.root}-{self.filter}-0_drz_wht.fits', 
                        data=self.wdata,
@@ -1017,9 +1017,9 @@ class FilterDetection(object):
                        data=self.wdata,
                        header=self.header, overwrite=True)
         
-        pyfits.writeto(f'{self.root}-{self.filter}-2_drz_wht.fits', 
-                       data=self.wfiltered[1],
-                       header=self.header, overwrite=True)
+        # pyfits.writeto(f'{self.root}-{self.filter}-2_drz_wht.fits', 
+        #                data=self.wfiltered[1],
+        #                header=self.header, overwrite=True)
         
         ### Run detection
         #bkg_params={'bw': 64, 'bh': 64, 'fw': 3, 'fh': 3}
@@ -1059,15 +1059,15 @@ class FilterDetection(object):
         #self.cat1 = self.cat1[~trim]
         
         ## Last step: filter2
-        if 0:
-            args['detection_params']['minarea'] = (24**2)
-            args['detection_params']['deblend_cont'] = 1.e-3
-            args['get_background'] = True
-            args['rescale_weight'] = True
-            args['err_scale'] = self.cat0.meta['ERR_SCALE'][0]*large_scale_weight
-            args['bkg_params'] = {'bw': 256, 'bh': 256, 'fw': 3, 'fh': 3}
-            self.cat2 = prep.make_SEP_catalog(f'{self.root}-{self.filter}-2',
-                                              threshold=thresholds[2], **args)
+        # if 0:
+        #     args['detection_params']['minarea'] = (24**2)
+        #     args['detection_params']['deblend_cont'] = 1.e-3
+        #     args['get_background'] = True
+        #     args['rescale_weight'] = True
+        #     args['err_scale'] = self.cat0.meta['ERR_SCALE'][0]*large_scale_weight
+        #     args['bkg_params'] = {'bw': 256, 'bh': 256, 'fw': 3, 'fh': 3}
+        #     self.cat2 = prep.make_SEP_catalog(f'{self.root}-{self.filter}-2',
+        #                                       threshold=thresholds[2], **args)
         
         #trim = (self.cat2['flux_aper_1'] / self.cat2['fluxerr_aper_1']) < 1.
         #self.cat2 = self.cat2[~trim]
@@ -1091,12 +1091,12 @@ class FilterDetection(object):
                                       use_ellipse=True,
                                       header='global color=red')
 
-        if 0:
-            cat2 = utils.read_catalog(f'{self.root}-{self.filter}-2.cat.fits')
-            prep.table_to_regions(cat2, f'{self.root}-{self.filter}-2.reg',
-                                      use_world=False, scale_major=3,
-                                      use_ellipse=True,
-                                      header='global color=orange')
+        # if 0:
+        #     cat2 = utils.read_catalog(f'{self.root}-{self.filter}-2.cat.fits')
+        #     prep.table_to_regions(cat2, f'{self.root}-{self.filter}-2.reg',
+        #                               use_world=False, scale_major=3,
+        #                               use_ellipse=True,
+        #                               header='global color=orange')
         
         cat0['layer'] = 0
         cat1['layer'] = 1
@@ -1627,7 +1627,7 @@ class FilterDetection(object):
                                 make_image_cols=True)
         
             big = cat['layer'] > 0
-            new2 = analyze_image(data, 
+            new2 = analyze_image(data_bkg, 
                                  err, seg, cat[big],
                                  athresh=analyze_thresh, 
                                  robust=analyze_robust,
@@ -1649,7 +1649,8 @@ class FilterDetection(object):
                             robust=analyze_robust,
                             allow_recenter=analyze_recenter,
                             prefix='', suffix='', grow=0, 
-                            subtract_background=False, include_empty=False, 
+                            subtract_background=False,
+                            include_empty=False, 
                             pad=analyze_pad,
                             dilate=analyze_dilate,
                             make_image_cols=True)
@@ -1699,6 +1700,7 @@ class FilterDetection(object):
         for k in cat.meta:
             new.meta[k] = cat.meta[k]
         
+        new.meta['FILTERSM'] = filter_small, 'Layer 0 analyzed on filtered image'
         ### ISO fluxes (flux within segments)
         iso_flux, iso_fluxerr, iso_area = prep.get_seg_iso_flux(data_bkg, seg, 
                                                  new[clean['ix']],
@@ -1713,7 +1715,33 @@ class FilterDetection(object):
         new['area_iso'][clean['ix']] = iso_area
         
         ### auto params
-        auto = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
+        # if filter_small & ('layer' in cat.colnames):
+        #     auto = prep.compute_SEP_auto_params(data, data - filter_image, 
+        #                                 err <= 0,
+        #                                 pixel_scale=pixel_scale,
+        #                                 err=err, segmap=seg,
+        #                                 tab=new[clean['ix']],
+        #                                 autoparams=autoparams, 
+        #                                 flux_radii=flux_radii,
+        #                                 subpix=0, verbose=True)
+        # 
+        #     big = new[clean['ix']]['layer'] > 0
+        #     auto2 = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
+        #                                 pixel_scale=pixel_scale,
+        #                                 err=err, segmap=seg,
+        #                                 tab=new[clean['ix']],
+        #                                 autoparams=autoparams, 
+        #                                 flux_radii=flux_radii,
+        #                                 subpix=0, verbose=True)
+        # 
+        #     for k in auto.colnames:
+        #         auto[k][big] = auto2[k][big]
+        #     
+        # else:
+        
+        ### Measure auto on bck-subtracted images, not filtered
+        if True:
+            auto = prep.compute_SEP_auto_params(data, data_bkg, err <= 0,
                                         pixel_scale=pixel_scale,
                                         err=err, segmap=seg,
                                         tab=new[clean['ix']],
@@ -1985,7 +2013,8 @@ class FilterDetection(object):
                 
         prep.table_to_regions(self.water_cat,
                               f'{self.root}-{self.filter}_final.reg',
-                                      use_world=False, scale_major=3,
+                                      use_world=False, 
+                                    scale_major=self.water_cat['kron_radius'],
                                       use_ellipse=True, 
                                       extra=extra)
 
@@ -2221,7 +2250,7 @@ class FilterDetection(object):
         self.new_cat, seg = self.reanalyze_image(data, err, seg, 
                                                 self.init_cat,
                                                 data_bkg=data_bkg,
-                                                filter_image=self.filtered[1],
+                                         filter_image=self.filtered[1]*to_ujy,
                                                 ZP=23.9,
                                                 pixel_scale=self.pixel_scale,
                                                 **kwargs)
@@ -2262,7 +2291,7 @@ class FilterDetection(object):
         self.water_cat, self.water_seg = self.reanalyze_image(data, err, 
                                               self.water_seg, self.water_cat, 
                                               data_bkg=data_bkg,
-                                              filter_image=self.filtered[1],
+                                         filter_image=self.filtered[1]*to_ujy,
                                               ZP=23.9,
                                               pixel_scale=self.pixel_scale,
                                               **kwargs)
@@ -2330,7 +2359,7 @@ class FilterDetection(object):
         self.water_cat, self.water_seg = self.reanalyze_image(data, err, 
                                               self.water_seg, self.water_cat, 
                                               data_bkg=data_bkg,
-                                              filter_image=self.filtered[1],
+                                         filter_image=self.filtered[1]*to_ujy,
                                               ZP=23.9,
                                               pixel_scale=self.pixel_scale,
                                               **kwargs)
