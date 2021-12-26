@@ -1102,17 +1102,18 @@ class FilterDetection(object):
         cat1['layer'] = 1
         
         if 0:
-            cat2['layer'] = 2
-        
-            large_q = cat2['b_image']/cat2['a_image']
-            clip = large_q < large_qmin
-            cat2 = cat2[~clip]
-            cat2['new_id'] = np.arange(len(cat2), dtype=int)+1
-
-            xp2 = np.round(cat2['x']).astype(int)
-            yp2 = np.round(cat2['y']).astype(int)
-
-            n2 = len(cat2)
+            pass
+            # cat2['layer'] = 2
+            #         
+            # large_q = cat2['b_image']/cat2['a_image']
+            # clip = large_q < large_qmin
+            # cat2 = cat2[~clip]
+            # cat2['new_id'] = np.arange(len(cat2), dtype=int)+1
+            # 
+            # xp2 = np.round(cat2['x']).astype(int)
+            # yp2 = np.round(cat2['y']).astype(int)
+            # 
+            # n2 = len(cat2)
         else:
             n2 = 0
             
@@ -1138,20 +1139,21 @@ class FilterDetection(object):
         #lost2 = sn2[yp2, xp2] < self.watershed_thresholds[1]
         
         if 0:
-            ### Objects in layer1 inherited from layer2
-            match_catalog_layers(cat1, cat2, max_offset=max_offsets[1],
-                                 low_layer=1, grow_radius=grow_radius, 
-                                 sort_column=sort_column,
-                                 make_plot=make_plot)
-        
-            thr = sn2[yp1, xp1] > self.watershed_thresholds[1]
-            layer12 = (cat1['layer'] == 2) & (thr)
-            cat1['layer'][~layer12] = 1
-        
-            # pull ellipse parameters
-            for c in ['a_image','b_image','theta_image',
-                      'xmin','xmax','ymin','ymax','number','new_id']:
-                cat1[c][layer12] = cat2[c][cat1['hix'][layer12]]
+            pass
+            # ### Objects in layer1 inherited from layer2
+            # match_catalog_layers(cat1, cat2, max_offset=max_offsets[1],
+            #                      low_layer=1, grow_radius=grow_radius, 
+            #                      sort_column=sort_column,
+            #                      make_plot=make_plot)
+            #         
+            # thr = sn2[yp1, xp1] > self.watershed_thresholds[1]
+            # layer12 = (cat1['layer'] == 2) & (thr)
+            # cat1['layer'][~layer12] = 1
+            #         
+            # # pull ellipse parameters
+            # for c in ['a_image','b_image','theta_image',
+            #           'xmin','xmax','ymin','ymax','number','new_id']:
+            #     cat1[c][layer12] = cat2[c][cat1['hix'][layer12]]
         else:
             # Put brightest objects from layer 1 in layer 2
             sn_auto = cat1['flux_aper_4']/cat1['fluxerr_aper_4']
@@ -1236,30 +1238,31 @@ class FilterDetection(object):
                 
         ### unmatched objects in layer0 to layer2
         if 0:
-            xcat1 = cat0[cat0['layer'] > 0]
-            ix0 = cat0['layer'] == 0
-            xcat0 = cat0[ix0]
-            cat2['used'] = False
-            iu = cat1['hix'][cat0['hix']]
-            cat2['used'][iu[iu > 0]] = True
-            ix2 = ~cat2['used']
-            xcat2 = cat2[ix2]
-        
-            match_catalog_layers(xcat0, xcat2, max_offset=max_offsets[0],
-                                 low_layer=0, grow_radius=grow_radius, 
-                                 sort_column=sort_column, 
-                                 make_plot=make_plot)
-        
-            thr = sn2[yp0[ix0], xp0[ix0]] > self.watershed_thresholds[1]
-            layer02 = (xcat0['layer'] > 0) & (thr)
-            xcat0['layer'][layer02] = 2
-        
-            for c in ['a_image','b_image','theta_image',
-                      'xmin','xmax','ymin','ymax','number','new_id']:
-                xcat0[c][layer02] = xcat2[c][xcat0['hix'][layer02]]
-        
-            for c in cat0.colnames:
-                cat0[c][ix0] = xcat0[c]
+            pass
+            # xcat1 = cat0[cat0['layer'] > 0]
+            # ix0 = cat0['layer'] == 0
+            # xcat0 = cat0[ix0]
+            # cat2['used'] = False
+            # iu = cat1['hix'][cat0['hix']]
+            # cat2['used'][iu[iu > 0]] = True
+            # ix2 = ~cat2['used']
+            # xcat2 = cat2[ix2]
+            #         
+            # match_catalog_layers(xcat0, xcat2, max_offset=max_offsets[0],
+            #                      low_layer=0, grow_radius=grow_radius, 
+            #                      sort_column=sort_column, 
+            #                      make_plot=make_plot)
+            #         
+            # thr = sn2[yp0[ix0], xp0[ix0]] > self.watershed_thresholds[1]
+            # layer02 = (xcat0['layer'] > 0) & (thr)
+            # xcat0['layer'][layer02] = 2
+            #         
+            # for c in ['a_image','b_image','theta_image',
+            #           'xmin','xmax','ymin','ymax','number','new_id']:
+            #     xcat0[c][layer02] = xcat2[c][xcat0['hix'][layer02]]
+            #         
+            # for c in cat0.colnames:
+            #     cat0[c][ix0] = xcat0[c]
         
         # Leftover sources in layer1
         add1 = sn1[yp1,xp1] > self.watershed_thresholds[0]
