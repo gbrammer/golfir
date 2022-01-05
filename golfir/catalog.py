@@ -897,7 +897,78 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
     
     else:
         return True
+
+
+def set_iso_total_flux(phot):
+    """
+    Use `flux_iso` as the total flux
+    
+    Calculate an effective "aperture" of the iso segment as
+    
+        >>> r_iso = np.sqrt(phot['area_iso']/np.pi/q)
+    
+    and for each aperture, use the aperture flux itself as the total if that
+    aperture is larger than `r_iso`.
+    
+    """
+    
+    from grizli import prep
+    #phot = utils.read_catalog(phot_file)
+    
+    # Which aperture to use, or loop over them
+    for ix in range(10):
+        if f'APER_{ix}' not in phot.meta:
+            continue
+    
+        total_flux = phot['flux_iso']*1
+
+        ap_size = phot.meta[f'APER_{ix}']/2
+        print(f'Aperture {ix} D={ap_size*2*0.1:.1f}"')
+
+        # Rough SMA of the iso footprint, i.e., the segmented pixels
+        if 'a' in phot.colnames:
+            q = phot['b']/phot['a']
+        else:
+            q = phot['b_image']/phot['a_image']
+            
+        riso = np.sqrt(phot['area_iso']/np.pi/q)
+
+        # Force aperture measurement for very small iso segments
+        small = riso < ap_size
+        total_flux[small] = phot[f'flux_aper_{ix}'][small]*1
+        phot[f'r_iso_{ix}'] = np.maximum(riso, ap_size)
+        phot[f'r_iso_{ix}'].description = 'Isophotal aperture size, pix'
         
+        ap_radius = phot[f'r_iso_{ix}']
+        
+        apcorr = np.clip(total_flux / phot[f'flux_aper_{ix}'], 1, 10)
+
+        # Encircled energy correction, depends on band
+        bands = []
+        for k in phot.meta:
+            if k.endswith('_ZP'):
+                bands.append(k.split('_')[0].lower())
+        
+        phot.meta['ISOTOTAL'] = True, 'Total flux defined by flux_iso, area_iso'
+        
+        #b = 'f160w'
+        for b in bands:
+            zp_b, aper_ee = prep.get_hst_aperture_correction(b, 
+                                                raper=ap_radius*0.1, rmax=5.)
+
+            totcorr = apcorr/aper_ee
+            
+            phot[f'{b}_eecorr_{ix}'] = 1./aper_ee
+            phot[f'{b}_eecorr_{ix}'].description = 'Encircled energy correction for flux outside the total (iso) aperture'
+            
+            phot[f'{b}_tot_{ix}'] = phot[f'{b}_flux_aper_{ix}']*totcorr
+            phot[f'{b}_tot_{ix}'].unit = phot[f'{b}_flux_aper_{ix}'].unit
+            phot[f'{b}_etot_{ix}'] = phot[f'{b}_fluxerr_aper_{ix}']*totcorr
+            phot[f'{b}_etot_{ix}'].unit = phot[f'{b}_flux_aper_{ix}'].unit
+            
+            phot[f'{b}_tot_{ix}'].description = 'Total flux corrected for aperture radii and flux outside the total (iso) aperture'
+            phot[f'{b}_etot_{ix}'].description = 'Total uncertainty corrected for aperture radii and flux outside the total (iso) aperture'
+
 
 class FilterDetection(object):
     """
@@ -1996,8 +2067,8 @@ class FilterDetection(object):
         wcat = cat
         
         return wcat, wseg
-        
-        
+
+
     def final_outputs(self, **kwargs):
         """
         Write output files and re-run multiband photometry catalog based on 
