@@ -969,7 +969,8 @@ def set_iso_total_flux(phot):
             phot[f'{b}_tot_{ix}'].description = 'Total flux corrected for aperture radii and flux outside the total (iso) aperture'
             phot[f'{b}_etot_{ix}'].description = 'Total uncertainty corrected for aperture radii and flux outside the total (iso) aperture'
 
-
+    return phot
+    
 class FilterDetection(object):
     """
     Source detection on median-filtered images
