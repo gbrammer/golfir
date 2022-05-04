@@ -64,5 +64,5 @@ setup(
         'Topic :: Scientific/Engineering :: Astronomy',
     ],
     install_requires=install_requires,
-    package_data={'golfir': ['data/*header', 'data/psf/*']},
+    package_data={'golfir': ['data/*header', 'data/psf/*', 'data/*zodi*']},
 )
