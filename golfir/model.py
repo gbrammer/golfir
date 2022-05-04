@@ -80,7 +80,8 @@ class ImageModeler(object):
         self.conv_method = conv_method
         
         # Read High-res (Hubble) data
-        self.read_hst_data(prefer_filter=prefer_filter, seg_prefix=seg_prefix)
+        self.read_hst_data(prefer_filter=prefer_filter, seg_prefix=seg_prefix, 
+                           **kwargs)
         
         # Dilate seg image
         if os.path.exists(f'{root}_waterseg.fits'):
@@ -193,7 +194,7 @@ class ImageModeler(object):
             os.system(f'cp {root}_phot.fits {root}_irac_phot.fits')
 
 
-    def read_hst_data(self, prefer_filter='f160w', seg_prefix='ir'):
+    def read_hst_data(self, prefer_filter='f160w', seg_prefix='ir', grow_hst_psf=None, force_hst_positive=True, **kwargs):
         """
         Read HST data
         """
@@ -222,15 +223,23 @@ class ImageModeler(object):
         ref_filter = grizli.utils.get_hst_filter(hst_im[0].header).lower()
         hst_wht = pyfits.open(ref_file.replace('_sci', '_wht'))
         
+        self.hst_psf_file = '{0}-{1}_psf.fits'.format(self.root, ref_filter)
+        
         try:
-            hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(self.root,
-                                  ref_filter))['PSF','DRIZ1'].data
+            hst_psf = pyfits.open(self.hst_psf_file)['PSF','DRIZ1'].data
         except:
-            hst_psf = pyfits.open('{0}-{1}_psf.fits'.format(self.root, 
-                                  ref_filter))[1].data
+            hst_psf = pyfits.open(self.hst_psf_file)[1].data
                                   
         hst_psf /= hst_psf.sum()
+        
+        if grow_hst_psf is not None:
+            cmt = f'Grow {self.hst_psf_file}: {grow_hst_psf}'
+            grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
+                   verbose=self.verbose, show_date=True)
 
+            #avg_psf = np.roll(np.roll(avg_psf, -2, axis=0), -2, axis=1)
+            hst_psf = nd.gaussian_filter(hst_psf, grow_hst_psf*1)
+            
         hst_seg = pyfits.open(f'{self.root}-{seg_prefix}_seg.fits')[0].data
         # Need doubled seg for ACS?
         if hst_seg.shape[0]*2 == hst_im[0].data.shape[0]:
@@ -251,7 +260,12 @@ class ImageModeler(object):
             phot_fnu = 1.
             
         hst_ujy = hst_im[0].data*phot_fnu
-        
+        if force_hst_positive:
+            cmt = f'Zero-out negative pixels in HST image'
+            grizli.utils.log_comment(self.LOGFILE, cmt+'\n',
+                   verbose=self.verbose, show_date=True)
+            hst_ujy = np.maximum(hst_ujy, 0)
+            
         bad = ~np.isfinite(hst_ujy)
         hst_wht[0].data[bad] = 0
         hst_ujy[bad] = 0
@@ -336,8 +350,9 @@ class ImageModeler(object):
         waterseg[self.hst_seg > 0] = self.hst_seg[self.hst_seg > 0]
         
         self.waterseg = waterseg
-        
-    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, shift_irsa_psf='auto', grow_irsa_psf=None, **kwargs):
+
+
+    def read_lores_data(self, filter='ch1', use_avg_psf=True, psf_obj=None, shift_irsa_psf='auto', grow_irsa_psf=None, use_zodi_weight=True, drizzle_effective_psf=False, **kwargs):
         """
         Read low-res (e.g., IRAC)
         """
@@ -447,7 +462,8 @@ class ImageModeler(object):
             
             #rscale = int(np.round(self.hst_wcs.pscale*100))/100
             irac_psf_obj = irac.IracPSF(ch=int(filter[-1]), scale=0.1,
-                                        verbose=self.verbose, avg_psf=avg_psf)
+                                        verbose=self.verbose, avg_psf=avg_psf,
+                                        use_zodi_weight=use_zodi_weight)
 
             self.ERR_SCALE = 1.
             # if os.path.exists('{0}-{1}.cat.fits'.format(self.root, filter)):
@@ -472,7 +488,7 @@ class ImageModeler(object):
                                         
             self.phot[f'{self.column_root}_nexp'] = nexp
             self.phot[f'{self.column_root}_exptime'] = expt
-        
+                                
         else:
             
             irac_im = pyfits.open('{0}-{1}_drz_sci.fits'.format(self.root, filter))[0]
@@ -507,12 +523,21 @@ class ImageModeler(object):
         
         self.lores_shape = self.lores_im.data.shape
         self.lores_wht = irac_wht/to_ujy**2
+        self.lores_wht_orig = self.lores_wht*1 # make a copy
+        
         self.lores_wcs = irac_wcs
         self.lores_xy = irac_wcs.all_world2pix(self.phot['ra'], 
                                                self.phot['dec'], 0)
         self.lores_xy = np.array(self.lores_xy).T
         self.pf = pf
         self.lores_filter = filter
+        
+        if (filter in ['ch1','ch2','ch3','ch4']) & drizzle_effective_psf:
+            self.redrizzle_irac_psf(subsample=4, recenter=False, 
+                                    size=30, weight_exptime=True, 
+                                    load_existing=True, rd=None, 
+                                    write_log_psf=True, 
+                                    verbose=True)
         
         # HST weight in LoRes frame
         #self.hst_wht_i = self.hst_wht[0].data[::self.pf, ::self.pf]
@@ -539,7 +564,7 @@ class ImageModeler(object):
         ##################
         # HST PSF in same dimensions as IRAC
         self.lores_tf = None
-        rd = self.hst_wcs.wcs.crval
+        rd = self.hst_wcs.calc_footprint().mean(axis=0)
         _psf, _, _ = self.lores_psf_obj.evaluate_psf(ra=rd[0], dec=rd[1], 
                                       min_count=1, clip_negative=True, 
                                       transform=self.lores_tf)
@@ -760,6 +785,93 @@ class ImageModeler(object):
         self.Nbg = self._Abg.shape[0]
 
 
+    def redrizzle_irac_psf(self, rd=None, subsample=4, recenter=False, size=30, weight_exptime=True, load_existing=False, write_log_psf=True, verbose=True, force_cryo=True):
+        """
+        Drizzle IRAC effective PSF for each AOR 
+        
+        Parameters
+        ----------
+        
+        Notes
+        -----
+        
+        """
+
+        irac_psf_obj = self.lores_psf_obj
+        
+        cryo_file = 'Cryo/apex_sh_IRAC{ch}_col129_row129_x100.fits'
+        warm_file = 'Warm/apex_sh_IRACPC{ch}_col129_row129_x100.fits'
+        
+        kernel = self.lores_im.header['KERNEL']
+        pixfrac = self.lores_im.header['PIXFRAC']
+        
+        for i, aor in enumerate(irac_psf_obj.psf_data.keys()):
+            psf_file = f'{aor}-{self.lores_filter}.log.psf.fits'
+            if load_existing & os.path.exists(psf_file):
+
+                msg = f'Load AOR psf {psf_file}'
+                grizli.utils.log_comment(self.LOGFILE, msg,
+                                         verbose=self.verbose, show_date=True)
+                    
+                epsf = pyfits.open(psf_file)[0].data
+                epsf_mask = (epsf > 0).flatten()
+                irac_psf_obj.psf_arrays['masked'][i,:] = epsf.flatten()
+                irac_psf_obj.psf_arrays['mask'][i,:] = epsf_mask
+                continue
+                
+            log = irac_psf_obj.psf_data[aor]['log']
+            
+            if log['mjd_obs'].max() < 54963.0:
+                prf_file = cryo_file
+            else:
+                prf_file = warm_file
+            
+            if force_cryo:
+                prf_file = cryo_file
+                
+            eff = utils.effective_psf(log, rd=rd, 
+                                      subsample=subsample,
+                                      size=size,
+                                      recenter=recenter,
+                                      pixel_scale=self.hst_wcs.pscale,
+                                      weight_exptime=weight_exptime,
+                                      use_native_orientation=False, 
+                                      prf_file=prf_file, 
+                                      pixfrac=pixfrac, 
+                                      kernel=kernel)
+                                      
+            epsf = eff[0]
+            epsf_mask = (epsf > 0).flatten()
+            irac_psf_obj.psf_arrays['masked'][i,:] = epsf.flatten()
+            irac_psf_obj.psf_arrays['mask'][i,:] = epsf_mask
+            
+            if write_log_psf:
+                h = pyfits.Header()
+                h['pscale'] = self.hst_wcs.pscale
+                h['pixfrac'] = pixfrac
+                h['kernel'] = kernel
+                h['size'] = size
+                h['recenter'] = recenter
+                h['filter'] = self.lores_filter
+                h['prf_file'] = prf_file
+                
+                if rd is None:
+                    h['aorcntr'] = True
+                    h['racenter'] = np.nan
+                    h['decenter'] = np.nan
+                else:
+                    h['aorcntr'] = False
+                    h['racenter'] = rd[0]
+                    h['decenter'] = rd[1]
+                    
+                hdu = pyfits.PrimaryHDU(header=h, data=epsf)
+                msg = f'Write AOR psf {psf_file}'
+                grizli.utils.log_comment(self.LOGFILE, msg,
+                                         verbose=self.verbose, show_date=True)
+
+                hdu.writeto(psf_file, overwrite=True)
+
+
     def patch_compute_models(self, mag_limit=24, border_limit=0.1, use_saved_components=False, resample_method='rescale', id_list=None, individual_psf=True, psf_kernel=None, kernel_correction=0, **kwargs):
         """
         Compute hst-to-IRAC components for objects in the patch
@@ -781,6 +893,8 @@ class ImageModeler(object):
             else:
                 msg = 'from segmentation'
         else:
+            msg = 'from id_list'
+            
             seg_ids = np.unique(self.patch_seg[hst_slice != 0])[1:]
             ids = []
             for id in id_list:
@@ -837,7 +951,8 @@ class ImageModeler(object):
                         
         for i, id in tqdm(enumerate(ids)):
             #print(i, id)
-            ix = phot['number'] == id
+            #ix = phot['number'] == id
+            ix = self.phot_idx[id]
             
             if use_saved_components:
                 _Ai = self.comp_to_patch(id)
@@ -847,8 +962,8 @@ class ImageModeler(object):
             
             # Evalutate PSF        
             if individual_psf | (psf_kernel is None):
-                _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix][0], 
-                                          dec=phot['dec'][ix][0], min_count=0, 
+                _ = self.lores_psf_obj.evaluate_psf(ra=phot['ra'][ix], 
+                                          dec=phot['dec'][ix], min_count=0, 
                                           clip_negative=True, 
                                           transform=xy_offset[i])
 
@@ -1776,7 +1891,13 @@ class ImageModeler(object):
             
         isly, islx = self.isly, self.islx
         self.full_mask[isly, islx] |= self.patch_mask
-
+        
+        # Set mask in HDF5 fiole
+        prime = pyfits.PrimaryHDU(header=self.lores_im.header, 
+                                  data=self.full_mask)
+        
+        self.comp_hdu.set_mask(prime)
+        
         wsl = self.patch_wcs
         
         # Slices for subcomponent models
@@ -2086,8 +2207,66 @@ class ImageModeler(object):
         
         tab.write(f'{self.root}_patch.fits', overwrite=True)
         return tab
+
+
+    def lores_curve_of_growth(self, nsteps=128):
+        """
+        Get curve of growth
+        """
+        import sep
+        
+        rd = self.hst_wcs.calc_footprint().mean(axis=0)
+        _psf, _, _ = self.lores_psf_obj.evaluate_psf(ra=rd[0], dec=rd[1], 
+                                      min_count=1, clip_negative=True, 
+                                      transform=self.lores_tf)
+        
+        yp, xp = np.indices(_psf.shape)
+        xc = (xp*_psf).sum()
+        yc = (yp*_psf).sum()
+        
+        radii = np.linspace(1, np.minimum(xc, yc), nsteps)
+        
+        _ap = sep.sum_circle(_psf, [xc], [yc], radii)
+        return radii*self.hst_wcs.pscale*u.arcsec, _ap[0]
+
     
-    def aperture_photometry(self, id=None, rd=None, aper_radius=3.6, subpix=0,  model_error_frac=0.1, use_valid_mask=True, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='twilight_shifted', fig_apargs=dict(color='w', alpha=0.3, linewidth=2),  labeleargs=dict(fontsize=9, va='top')):
+    def patch_flag_bad_chi2(self, model_sn_threshold=50, **kwargs):
+        """
+        """
+        sn = (self.phot[f'irac_{self.lores_filter}_flux'] / 
+              self.phot[f'irac_{self.lores_filter}_err'])[self.patch_idx]
+        
+        high_sn = sn > model_sn_threshold
+        ids = self.patch_ids[high_sn]
+        for id in ids:
+            self.component_chi2(id=id, **kwargs)
+
+
+    def component_chi2(self, id=None, sn_threshold=30, chi2_threshold=2.5, min_pix=16):
+        """
+        Chi-squared of a single component
+        """
+
+        # model component
+        try:
+            comp = self.comp_to_patch(id, full_image=True, flatten=False)
+        except:
+            raise ValueError(f'Could not generate component model for #{id}')
+
+        comp_sn = comp*self.lores_sivar
+        msk = (comp_sn > sn_threshold) & (self.lores_wht > 0)
+        resid = (self.lores_im.data - self.full_model)[msk]
+        chi2m = resid**2*self.lores_wht[msk]
+        npix = msk.sum()
+        chi2 = chi2m.sum() / msk.sum()
+
+        if (chi2 > chi2_threshold) & (npix > min_pix):
+            self.lores_wht[msk] = 0
+            
+        return chi2, msk.sum()
+                
+        
+    def aperture_photometry(self, id=None, rd=None, aper_radius=1.5, subpix=0,  model_error_frac=0.1, use_valid_mask=True, make_figure=False, fig_grow=2, dtick=1., vm='Auto', stretch=LogStretch(), add_label=True, cmap='twilight_shifted', fig_apargs=dict(color='w', alpha=0.3, linewidth=2),  labeleargs=dict(fontsize=9, va='top')):
         """
         Forced aperture photometry. 
         
@@ -2160,11 +2339,25 @@ class ImageModeler(object):
         if (id is None) & (rd is None):
             raise ValueError('Must specify either `id` or `rd`')
         
-        try:
-            ix = np.where(self.phot['number']  == id)[0][0]
-        except:
+        if id is not None:
+            try:
+                ix = self.phot_idx[id]
+            except:
+                if rd is None:
+                    raise ValueError(f'#{id} not found in catalog, must '
+                                     'specify `rd` coordinates for aperture.')
+        else:
             if rd is None:
-                raise ValueError(f'#{id} not in catalog, must specify `rd`.')
+                raise ValueError(f'No `id` specified, must then specify '
+                                 ' `rd` coordinates for aperture.')
+            
+
+        # try:
+        #     #ix = np.where(self.phot['number']  == id)[0][0]
+        #     
+        # except:
+        #     if rd is None:
+        #         raise ValueError(f'#{id} not in catalog, must specify `rd`.')
             
         #############
         # Image data
@@ -2302,7 +2495,7 @@ class ImageModeler(object):
             
         return aper_data, fig
     
-    def run_all_apertures(self, selection=None, aper_radius=1., model_error_frac=0.1):
+    def run_all_apertures(self, selection=None, aper_radius=1.5, model_error_frac=0.1, use_valid_mask=True):
         """
         Run aperture photometry for every object in `self.phot` and add 
         columns to the table.
@@ -2318,6 +2511,15 @@ class ImageModeler(object):
             
         if selection is None:
             ss = np.isfinite(self.phot['number'])
+            
+            if use_valid_mask:
+                not_valid = (self.full_mask == 0)
+            else:
+                not_valid = (self.lores_wht <= 0)
+            
+            xyp = np.cast[int](np.round(self.lores_xy))
+            ss &= (~not_valid[xyp[:,1], xyp[:,0]])
+            
         else:
             ss = selection
             
@@ -2501,7 +2703,7 @@ def run_all_patches(root, PATH='/GrizliImaging/', ds9=None, sync_results=True, c
                 print('####################\n\nRun {0} patch {1}/{2}\n\n####################'.format(ch, i+1, N))        
                 self.run_full_patch(rd_patch=rd_patch, patch_arcmin=tab['patch_arcmin'][i], patch_id=tab['patch_id'][i], **kwargs)# ds9=None, patch_id=0, mag_limit=24, galfit_flux_limit=None, match_geometry=False, **kwargs)
                 models[ch] = self
-            except:
+            except ValueError:
                 LOGFILE=f'{root}.modeler.log.txt'
                 grizli.utils.log_exception(LOGFILE, traceback, verbose=True)
                 continue

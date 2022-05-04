@@ -241,6 +241,11 @@ def resample_array(img, wht=None, pixratio=2, slice_if_int=True, int_tol=1.e-3, 
             res_wht = _drz[1]
             method_used = 'drizzle'
             
+        elif method.lower() == 'convolve':
+            kern = np.ones((step,step))/step**2
+            res = convolve_helper(img, kern)[step//2::step, step//2::step]
+            res_wht = np.ones_like(res)
+            method_used = 'convolve'
         elif slice_if_int:
             # Simple slice
             res = img[step//2::step, step//2::step]*1
@@ -397,8 +402,9 @@ def match_slice_to_shape(slparent, nparent):
     oslparent = slice(slparent.start+left, slparent.stop-right, slparent.step)
     oslchild= slice(left, nchild-right, slparent.step)
     return oslparent, oslchild
-    
-def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='square', recenter=False, use_native_orientation=False):
+
+
+def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='square', recenter=False, use_native_orientation=False, weight_exptime=True, subsample=4,  prf_file='IRAC/apex_sh_IRACPC{ch}_col129_row129_x100.fits'):
     """
     Drizzle effective PSF model given the oversampled model PRF
     
@@ -420,12 +426,12 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     
     N = len(log)
     
-    #if rd is None:
-    rd = np.mean(log['crval'][:N//2], axis=0)
+    if rd is None:
+        rd = np.mean(log['crval'][:N//2], axis=0)
     
     #ipsf = pyfits.open(f'../AvgPSF/IRAC/apex_sh_IRACPC{ch}_col129_row129_x100.fits', relax=True)
 
-    ipsf = pyfits.open(f'../AvgPSF/Cryo/apex_sh_IRAC{ch}_col129_row129_x100.fits', relax=True)
+    ipsf = pyfits.open(prf_file.format(ch=ch), relax=True)
 
     #ipsf = pyfits.open(f'../AvgPSF/IRAC/IRACPC{ch}_col129_row129.fits')
     
@@ -445,12 +451,14 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
         i0 = [xc, yc]
     else:
         i0 = [s//2 for s in ish]
+        xc, yc = i0
         
     # Number of pixels to extract
     inp = np.min([xc, yc]) - osamp//2
     # Extra padding
     if osamp == 100:
-        inp -= 20
+        #inp -= 20
+        inp = 1200
     else:
         inp -= 1
         
@@ -461,17 +469,19 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     wht_i = np.ones((256,256), dtype=np.float32)
     
     coords = [rd]
-    cosd = np.cos(rd[1]/180*np.pi)
-    for dx in np.linspace(-1, 1, 4):
-        for dy in np.linspace(-1, 1, 4):
-            if dx == dy == 0:
-                continue
+    if subsample > 0:
+        coords = []
+        cosd = np.cos(rd[1]/180*np.pi)
+        for dx in np.linspace(-1, 1, subsample):
+            for dy in np.linspace(-1, 1, subsample):
+                if dx == dy == 0:
+                    continue
             
-            delta = np.array([dx/cosd/60, dy/60])
-            coords.append(rd+delta)
+                delta = np.array([dx/cosd/60, dy/60])
+                coords.append(rd+delta)
             
     for k in range(N):
-        print('Parse file: {0}'.format(log['file'][k]))
+        print('Parse file {0}: {1}'.format(k, log['file'][k]))
         
         if 0:
             cd = log['cd'][k] 
@@ -498,35 +508,38 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
         
         for coo in coords:
             try:
-                xy = wcs_i.all_world2pix([coo], 0).flatten() + 0.5
+                xy = wcs_i.all_world2pix([coo], 0).flatten() #+ 0.5
                 # if ch == 2:
                 #     xy += 0.25
             except:
                 print('wcs failed')
                 continue
             
-            xyp = np.cast[int](np.floor(xy))
-            phase = np.cast[int](np.round((xy-xyp)*osamp - osamp/2.))
+            #xyp = np.cast[int](np.floor(xy))
+            #phase = np.cast[int](np.round((xy-xyp-0.5)*osamp))
+            xyp = np.cast[int](np.round(xy))
+            phase = np.cast[int](np.round((xy-xyp)*osamp))
         
             oslx = slice(i0[0]-phase[0]-inp, i0[0]-phase[0]+inp+1, osamp)
             osly = slice(i0[1]-phase[1]-inp, i0[1]-phase[1]+inp+1, osamp)
-            psf_sub = ipsf[0].data[osly, oslx]
+            psf_sub = ipsf[0].data[osly, oslx] #*coswindow
             osh = psf_sub.shape
         
             nparent = 256
-            slx0 = slice(xyp[0]-osh[1]//2, xyp[0]+osh[1]//2)
-            sly0 = slice(xyp[1]-osh[0]//2, xyp[1]+osh[0]//2)  
+            slx0 = slice(xyp[0]-osh[1]//2, xyp[0]+osh[1]//2+1)
+            sly0 = slice(xyp[1]-osh[0]//2, xyp[1]+osh[0]//2+1)  
         
             slpx, slcx = (match_slice_to_shape(slx0, nparent))    
             slpy, slcy = (match_slice_to_shape(sly0, nparent))    
             try:
                 sci_i[slpy, slpx] += psf_sub[slcy, slcx]
             except:
-                print('slice failed')
+                print('slice failed', sci_i[slpy, slpx].shape, psf_sub[slcy, slcx].shape)
                 
         wcs_list.append(wcs_i)
         sci_list.append(sci_i)
-        wht_list.append((sci_i != 0).astype(np.float32))
+        wht = log['exptime'][k]**weight_exptime
+        wht_list.append(((sci_i != 0)*wht).astype(np.float32))
     
     if use_native_orientation:   
         cd = log['cd'][0] 
@@ -567,8 +580,11 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
 
     drz_psf = (_drz[0]*coswindow) / (_drz[0]*coswindow).sum()     
               
-    pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_psf.fits', data=drz_psf, overwrite=True)
-
+    if 0:
+        pyfits.writeto(f'irsa_{pixel_scale}pix_ch{ch}_psf.fits', data=drz_psf, overwrite=True)
+    else:
+        return drz_psf, sci, wht
+        
 
 def recenter_psfs():
     
@@ -799,3 +815,185 @@ def argv_to_dict(argv, defaults={}, dot_dict=True):
             
     
     return args, kwargs    
+    
+
+def make_zodimodel():
+    """
+    Create precomputed model of the Zodiacal light seen by Spitzer
+    
+    `zodipy` requires Python 3.8
+    
+    """
+    import astropy.time
+    import astropy.units as u
+    import zodipy
+    import numpy as np
+    import astropy.io.fits as pyfits
+    
+    # Few days after launch
+    t0 = astropy.time.Time('2003-09-01')
+    
+    # Decomissioned
+    t1 = astropy.time.Time('2020-01-28')
+    
+    # Time step, days
+    tstep = 3
+    times = np.arange(t0.mjd, t1.mjd, tstep)
+    
+    model = zodipy.InterplanetaryDustModel()
+    
+    nside = 32
+    
+    emission = model.get_instantaneous_emission(
+        3.6*u.micron, 
+        nside=nside, 
+        observer="Spitzer", 
+        epochs=times[0],  # 2010-01-01 (iso) in MJD
+        coord_out="C"
+    )
+    
+    sh = (len(times), emission.size)
+    
+    maps = {}
+    for w in [3.6, 4.5, 5.8, 7.8]:
+        maps[w] = np.zeros(sh, dtype=np.float32)
+        
+        for i, t in enumerate(times):
+            print(i, t)
+            maps[w][i,:] = model.get_instantaneous_emission(
+                                        w*u.micron, 
+                                        nside=nside, 
+                                        observer="Spitzer", 
+                                        epochs=t,
+                                        coord_out="C"
+                                    )
+    
+    h = pyfits.Header()
+    h['NSIDE'] = nside, 'Healpix NSIDE'
+    h['WAVE'] = w, 'Wavelength, microns'
+    h['T0'] = t0.mjd, 'Start time, MJD'
+    h['T1'] = t1.mjd, 'End type, MJD'
+    h['TSTEP'] = tstep, 'Time step, days'
+    
+    for i, w in enumerate(maps):
+        h['CHANNEL'] = i+1
+        h['WAVE'] = w
+        h['EXTNAME'] = f'{w:.1f}'
+        if i == 0:
+            hdu = pyfits.PrimaryHDU(data=maps[w], header=h)
+            hdul = pyfits.HDUList([hdu])
+        else:
+            hdu = pyfits.ImageHDU(data=maps[w], header=h)
+            hdul.append(hdu)
+            
+    hdul.writeto(f'spitzer_zodi_healpy_{nside}.fits', overwrite=True)
+
+
+def get_zodi_file():
+    """
+    Get path to module zodi file
+    """
+    path = os.path.join(os.path.dirname(__file__), 
+                        'data/spitzer_ch1_zodi_healpy_16.fits')
+    return path
+
+
+def get_spitzer_zodimodel(ra=150.1, dec=2.1, mjd=54090., zodi_file=None, ch=1, exptime=None, ch1_scale=4.):
+    """
+    Evaluate the zodi model at a given sky coordinate + epoch
+    
+    Parameters
+    ----------
+    ra : float
+        Target Right Ascension, degrees
+    
+    dec : float
+        Target declination, degrees
+    
+    mjd : float, array-like
+        Modified Julian Date[s] of the observation
+    
+    zodi-file : str, `~astropy.io.fits.HDUList`
+        Filename of the precomputed Spitzer zodi map, or the opened zodi_file.
+        If `None`, then get the file distributed with the module in 
+        `golfir.utils.get_zodi_file`.
+    
+    ch : int
+        IRAC channel (1-4)
+    
+    exptime : float or array-like
+        Exposure time used to calculate total noise
+    
+    Returns
+    -------
+    
+    zodi_data : float, array-like
+        Zodi data evaluated at the HEALPIX pixel of the target coordinates
+        and interpolated at the specified times.  Returned in units of 
+        MJy / steradian.
+    
+    noise_unit : float, array-like
+        If `exptime` specified then return expected noise from sky + read
+        noise in calibrated units MJy / steradian.
+        
+    """
+    from astropy.coordinates import SkyCoord, FK5
+    from astropy_healpix import HEALPix
+    import astropy.units as u
+    
+    if zodi_file is None:
+        zodi_file = get_zodi_file()
+        
+    if isinstance(zodi_file, str):
+        zodi = pyfits.open(zodi_file)
+    else:
+        zodi = zodi_file
+    
+    if isinstance(ch, str):
+        ch = int(ch[-1])
+        
+    # if len(zodi) > 1:
+    #     ich = ch-1
+    # else:
+    #     ich = 0
+    
+    ich = np.minimum(len(zodi), ch)-1
+    
+    # Rouch scale corrections for single file with ch1 estimates
+    if len(zodi) == 1:
+        scale = {1:1, 2:3.5, 3:19, 4:73}[ch]
+    else:
+        scale = 1.
+    
+    scale *= ch1_scale
+       
+    h = zodi[ich].header
+    nside = h['NSIDE']
+    times = np.arange(h['T0'], h['T1'], h['TSTEP'])
+    
+    hp = HEALPix(nside=nside, order='ring', frame=FK5())
+    coo = SkyCoord(ra, dec, unit=('deg','deg'))
+    ix = hp.skycoord_to_healpix(coo)
+    
+    zodi_ix = zodi[ich].data[:,ix]
+    zodi_data = np.interp(mjd, times, zodi_ix,
+                          left=zodi_ix[0], right=zodi_ix[-1]) * scale
+    
+    # https://irsa.ipac.caltech.edu/data/SPITZER/docs/irac/iracinstrumenthandbook/62/
+    RONOISE = [22.4, 23.7, 9.1, 7.1]
+    GAIN = [3.7, 3.71, 3.8, 3.8]
+    FLUXCONV = [0.1257, 0.1447, 0.5858, 0.2026]
+    DARK = [0.05, 0.28, 1, 3.8]
+    
+    if exptime is not None:
+        DN = zodi_data / FLUXCONV[ch-1]
+        elec = GAIN[ch-1] * DN
+        noise = np.sqrt((elec+DARK[ch-1])*exptime + RONOISE[ch-1]**2)/exptime
+        noise_unit = noise / GAIN[ch-1] * FLUXCONV[ch-1]
+    else:
+        noise_unit = None
+        
+    return zodi_data, noise_unit
+    
+    
+    

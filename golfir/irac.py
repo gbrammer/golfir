@@ -19,7 +19,7 @@ from photutils import (HanningWindow, TukeyWindow,
                        CosineBellWindow,
                        SplitCosineBellWindow, TopHatWindow)
 
-from .utils import warp_image
+from .utils import warp_image, get_zodi_file, get_spitzer_zodimodel
 
 try:
     from drizzlepac.astrodrizzle import ablot
@@ -1560,16 +1560,25 @@ class IracPSF(object):
     """
     Tools for generating an IRAC PSF at an arbitrary location in a mosaic
     """
-    def __init__(self, ch=1, scale=0.1, verbose=True, aor_list=None, avg_psf=None):
+    def __init__(self, ch=1, scale=0.1, verbose=True, aor_list=None, avg_psf=None, use_zodi_weight=True):
         self.psf_data = OrderedDict()
         self.psf_arrays = OrderedDict()
         self.ch = ch
         self.scale = scale
         self.avg_psf = avg_psf
 
+        self.warm_weight = {1:7, 2:1}
+        
+        zodi_file = get_zodi_file()
+        if os.path.exists(zodi_file) & use_zodi_weight:
+            self.zodi_hdu = pyfits.open(zodi_file)
+        else:
+            self.zodi_hdu = None
+            
         _ = self.load_psf_data(ch=ch, scale=scale, verbose=verbose, aor_list=aor_list, avg_psf=self.avg_psf)
         self.psf_data, self.psf_arrays = _
-      
+        
+            
     @property
     def N(self):
         return len(self.psf_data)
@@ -1599,6 +1608,20 @@ class IracPSF(object):
 
             log = utils.read_catalog(file)
             
+            if self.zodi_hdu is not None:
+                has_zodi = True
+                coo = np.mean(log['crval'], axis=0)
+                zlev, zerr = get_spitzer_zodimodel(ra=coo[0], dec=coo[1], 
+                                                   zodi_file=self.zodi_hdu, 
+                                                   mjd=log['mjd_obs'],
+                                                   ch=ch, 
+                                                   exptime=log['exptime'])
+                log['weight'] = 1/zerr**2
+            else:
+                log['weight'] = log['exptime']
+                
+                has_zodi = False
+                
             psf_files = [f'{aor}-ch{ch}-{scale:.1f}.{ext}.fits' 
                          for ext in ['psf','psfr']]
                                                          
@@ -1609,7 +1632,7 @@ class IracPSF(object):
                     break
                     
             if verbose:
-                print(f'load_psf_data: log={file}, psf={psf_file}')
+                print(f'load_psf_data: log={file} zodi={has_zodi} psf={psf_file}')
             
             if os.path.exists(psf_file):    
                 psf = pyfits.open(psf_file)
@@ -1708,6 +1731,7 @@ class IracPSF(object):
         
         exptime = np.zeros(self.N)
         count = np.zeros(self.N, dtype=int)
+        expwht = np.zeros(self.N)
         
         point = (ra, dec)
         for i, aor in enumerate(self.psf_data):
@@ -1719,6 +1743,7 @@ class IracPSF(object):
                 if pat.contains_point(point):
                     #print(i, j)
                     exptime[i] += self.psf_data[aor]['log']['exptime'][j]
+                    expwht[i] += self.psf_data[aor]['log']['weight'][j]
                     count[i] += 1
         
         count_mask = (count > min_count)      
@@ -1729,17 +1754,23 @@ class IracPSF(object):
         mjd0 = np.array([self.psf_data[aor]['log']['mjd_obs'][0] 
                         for aor in self.psf_data])
         
-        if self.ch == 1:
-            warm_scale = 1+(mjd0 > 54963.0)*7
-        elif self.ch == 2:
-            warm_scale = 1+(mjd0 > 54963.0)*1
-        else:
-            warm_scale = 1.
+        # if self.ch in self.warm_weight:
+        #     warm_scale = 1+(mjd0 > 54963.0)*self.warm_weight[self.ch]
+        # else:
+        #     warm_scale = 1.
+        warm_scale = 1.
             
-        expwht = (exptime/warm_scale)[count_mask]
+        # if self.ch == 1:
+        #     warm_scale = 1+(mjd0 > 54963.0)*7
+        # elif self.ch == 2:
+        #     warm_scale = 1+(mjd0 > 54963.0)*1
+        # else:
+        #     warm_scale = 1.
+            
+        #expwht = (exptime/warm_scale)[count_mask]
         #num = (self.psf_arrays['image']*self.psf_arrays['mask'])
-        num = self.psf_arrays['masked'][count_mask].T.dot(expwht)
-        den = (self.psf_arrays['mask'][count_mask]).T.dot(expwht)
+        num = self.psf_arrays['masked'][count_mask].T.dot(expwht[count_mask])
+        den = (self.psf_arrays['mask'][count_mask]).T.dot(expwht[count_mask])
         
         psf = (num/den).reshape(self.psf_arrays['shape'])
         psf[~np.isfinite(psf)] = 0
@@ -1883,8 +1914,8 @@ def combine_products(wcsfile='r15560704/ch1/bcd/SPITZER_I1_15560704_0036_0000_6_
         
     wcs = pyfits.open(wcsfile)
     if 'SPITZER_M' in wcsfile:
-        bcd_file = glob.glob(wcsfile.replace('_wcs.fits','[_e]bcd.fits'))[0]
-        bunc_file = glob.glob(wcsfile.replace('_wcs.fits','[_e]bunc.fits'))[0]
+        bcd_file = glob.glob(wcsfile.replace('_wcs.fits','*bcd.fits'))[0]
+        bunc_file = glob.glob(wcsfile.replace('_wcs.fits','*bunc.fits'))[0]
         cbcd = pyfits.open(bcd_file)
         cbunc = pyfits.open(bunc_file)
     else:
