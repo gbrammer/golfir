@@ -1951,9 +1951,13 @@ class FilterDetection(object):
         1. Thresholds set above in `pipeline`
         
         """
-        from skimage.segmentation import watershed
+        #from skimage.segmentation import watershed
+        try:
+            from skimage.morphology import watershed
+        except:
+            from skimage.segmentation import watershed
+
         #from skimage.segmentation import expand_labels
-        
 
         ##### Layer 0            
         xp = np.round(cat['x']).astype(int)

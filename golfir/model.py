@@ -28,7 +28,11 @@ import astropy.units as u
 from astropy.visualization import (ImageNormalize, LogStretch,
                                    SinhStretch, LinearStretch)
 
-from photutils import create_matching_kernel
+try:
+    from photutils import create_matching_kernel
+except:
+    from photutils.psf.matching import create_matching_kernel
+    
 from photutils import (HanningWindow, TukeyWindow, CosineBellWindow,
                        SplitCosineBellWindow, TopHatWindow)
 
@@ -311,7 +315,11 @@ class ImageModeler(object):
         Dilate the SExtractor/SEP segmentation image using the 
         `~skimage.morphology.watershed` algorithm.
         """
-        from skimage.morphology import watershed
+        try:
+            from skimage.morphology import watershed
+        except:
+            from skimage.segmentation import watershed
+            
         from astropy.convolution.kernels import Gaussian2DKernel
         
         grizli.utils.log_comment(self.LOGFILE, 
