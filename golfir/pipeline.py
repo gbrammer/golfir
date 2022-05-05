@@ -259,9 +259,17 @@ def irac_mosaics(root='j000308m3303', home='/GrizliImaging/', pixfrac=0.2, kerne
             avg[wht == 0] = 0
 
             # Window
-            from photutils import (HanningWindow, TukeyWindow, 
-                                   CosineBellWindow,
-                                   SplitCosineBellWindow, TopHatWindow)
+            try:    
+                from photutils import (HanningWindow, TukeyWindow, 
+                                        CosineBellWindow, 
+                                        SplitCosineBellWindow, 
+                                        TopHatWindow)
+            except:
+                from photutils.psf.matching import (HanningWindow, 
+                                        TukeyWindow, 
+                                        CosineBellWindow, 
+                                        SplitCosineBellWindow, 
+                                        TopHatWindow)
 
             coswindow = CosineBellWindow(alpha=1)
             avg *= coswindow(avg.shape)**0.05

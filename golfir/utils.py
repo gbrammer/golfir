@@ -410,7 +410,16 @@ def effective_psf(log, rd=None, size=30, pixel_scale=0.1, pixfrac=0.2, kernel='s
     
     ** not used, testing **
     """
-    from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
+    #from photutils import (HanningWindow, TukeyWindow, CosineBellWindow, SplitCosineBellWindow, TopHatWindow)
+    try:    
+        from photutils import (HanningWindow, TukeyWindow, 
+                                CosineBellWindow, SplitCosineBellWindow, 
+                                TopHatWindow)
+    except:
+        from photutils.psf.matching import (HanningWindow, TukeyWindow, 
+                                CosineBellWindow, SplitCosineBellWindow, 
+                                TopHatWindow)
+    
     import grizli.utils
     
     # r48106752/ch1/bcd/SPITZER_I1_48106752_0001_0000_2_cbcd.fits
