@@ -15,9 +15,14 @@ import astropy.io.fits as pyfits
 import astropy.wcs as pywcs
 import astropy.units as u
 
-from photutils import (HanningWindow, TukeyWindow, 
-                       CosineBellWindow,
-                       SplitCosineBellWindow, TopHatWindow)
+try:    
+    from photutils import (HanningWindow, TukeyWindow, 
+                            CosineBellWindow, SplitCosineBellWindow, 
+                            TopHatWindow)
+except:
+    from photutils.psf.matching import (HanningWindow, TukeyWindow, 
+                            CosineBellWindow, SplitCosineBellWindow, 
+                            TopHatWindow)
 
 from .utils import warp_image, get_zodi_file, get_spitzer_zodimodel
 
