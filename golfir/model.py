@@ -32,10 +32,16 @@ try:
     from photutils import create_matching_kernel
 except:
     from photutils.psf.matching import create_matching_kernel
-    
-from photutils import (HanningWindow, TukeyWindow, CosineBellWindow,
-                       SplitCosineBellWindow, TopHatWindow)
 
+try:    
+    from photutils import (HanningWindow, TukeyWindow, 
+                            CosineBellWindow, SplitCosineBellWindow, 
+                            TopHatWindow)
+except:
+    from photutils.psf.matching import (HanningWindow, TukeyWindow, 
+                            CosineBellWindow, SplitCosineBellWindow, 
+                            TopHatWindow)
+    
 try:
     import drizzlepac
     from drizzlepac.astrodrizzle import ablot
