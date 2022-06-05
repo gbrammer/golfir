@@ -30,7 +30,329 @@ eso = astroquery.eso.Eso()
 if False:
     eso.login() #reenter_password=True)
 
-def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True, radec=None):
+def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
+    """
+    """
+    import astropy.io.fits as pyfits
+    from grizli import utils
+    import os
+    import numpy as np
+    
+    coord = "AND ra > {0} AND ra < {1} AND dec > {2} AND dec < {3}".format(rd[0]-1.0, rd[0]+1.0, rd[1]-1.0, rd[1]+1.0) # UDS
+
+    query = f"""SELECT * FROM dbo.raw
+    WHERE (instrument='HAWKI') AND (filter_path='KS,OPEN')
+    AND tpl_nexp > {min_nexp}
+    {coord}
+    """
+    #query = "SELECT * FROM ivoa.ObsCore WHERE obs_collection='MUSE-DEEP' OR obs_collection='MUSE'"
+
+    MAXREC=200000
+    qstr = query.replace("'","%27").replace(' ','+').replace('\n','+').replace('=','%3D')
+    qstr = qstr.replace('>','%3E').replace('<','%3C')
+    TAP_URL = "http://archive.eso.org/tap_obs/sync?REQUEST=doQuery&FORMAT=fits&LANG=ADQL&MAXREC={0}&QUERY={1}"
+    SEND = TAP_URL.format(MAXREC, qstr)
+    print(SEND)
+
+    im = pyfits.open(SEND)
+    hi = utils.GTable()
+    for c in im[1].data.columns:
+        if len(im[1].data[c.name]) > 0:
+            hi[c.name] = im[1].data[c.name]
+    #
+    #so = np.argsort(hi['ob_id']*100+hi['tpl_expno'])
+    so = np.argsort(hi['exp_start'])
+    hi = hi[so]
+    return hi
+    
+    #hi['obs_collection'] = [o.strip() for o in hi['obs_collection']]
+    for i, f in enumerate(hi['access_url']):
+        local_file = os.path.basename(f)+'.fits'
+        if os.path.exists(local_file):
+            print(i, local_file)
+        else:
+            print(f'\n\n{i+1} / {len(hi)} : Fetch {local_file}\n')
+            os.system(f'wget "{f}" -O {local_file}.Z -nv')
+            os.system(f'gunzip {local_file}.Z')
+     
+def avg():
+    import glob
+    from tqdm import tqdm
+    from astropy.io.fits import Header
+    
+    files = glob.glob('ob1012480-20131025-005002-0*-1.cat.fits')
+
+    chip = 1    
+    files = glob.glob(f'*-{chip}.cat.fits')
+    
+    files.sort()
+    roots = [f.split('.cat.fits')[0] for f in files]
+    
+    h = [fit_sip(root=root, degree=3) for root in tqdm(roots)]
+    
+    avgh = Header()
+    for k in h[0]:
+        avgh[k] = h[0][k]
+        
+    keys = {}
+    for k in h[0]:
+        if isinstance(h[0][k], float):
+            keys[k] = []
+                
+    for i, hi in enumerate(h):
+        print(i, hi['SIPRAMAD'], hi['SIPDEMAD'])
+        for k in keys:
+            keys[k].append(hi[k])
+    
+    for k in keys:
+        stats = np.percentile(keys[k], [5, 16, 50, 84, 95])
+        avgh[k] = stats[2]
+        print(k, stats)
+    
+    lib = Header.fromtextfile(f'../libralato_hawki_chip{chip}.crpix.header')
+    for k in list(avgh.keys()):
+        if k not in lib:
+            avgh.remove(k)
+        else:
+            print(k, avgh[k], lib[k])
+    
+    avgh['OEXTNAME'] = lib['OEXTNAME']
+    avgh['COMMENT'] = 'SIP fit to Abell 2744'
+    avgh.totextfile(f'../a2744_hawki_chip{chip}.crpix.header')
+    
+def fit_sip(root='ob1012480-20131025-005002-002-1', degree=3):
+    """
+    """     
+    from grizli import jwst_utils, utils
+    import astropy.io.fits as pyfits
+    import astropy.wcs as pywcs
+    from astropy.io.fits import Header
+    from scipy.optimize import least_squares
+    
+    rd = utils.read_catalog('../hst.radec')
+    im = pyfits.open(f'{root}.sci.fits')
+    wcs = pywcs.WCS(im[0].header) 
+    cat = utils.read_catalog(f'{root}.cat.fits')
+    idx, dr = rd.match_to_catalog_sky(cat)
+    hasm = dr.value < 0.25
+    
+    x, y = rd['ra'][idx][hasm], rd['dec'][idx][hasm]
+    u, v = cat['x'][hasm], cat['y'][hasm]
+    
+    lsq_args = jwst_utils.LSQ_ARGS
+    
+    #degree = 3
+    
+    crpix = 1024.5, 1024.5
+    crpix = im[0].header['CRPIX1'], im[0].header['CRPIX2']
+    
+    crval = np.squeeze(wcs.all_pix2world([crpix[0]], [crpix[1]], 1))
+    
+    header = Header()
+    header['RADESYS'] = 'ICRS'
+    header['CTYPE1'] = 'RA---TAN'
+    header['CTYPE2'] = 'DEC--TAN'
+
+    header['CUNIT1'] = header['CUNIT2'] = 'deg'
+
+    header['CRPIX1'] = crpix[0]
+    header['CRPIX2'] = crpix[1]
+
+    header['CRVAL1'] = crval[0]
+    header['CRVAL2'] = crval[1]
+
+    cosd = np.cos(crval[1]/180*np.pi)
+    cd = wcs.wcs.cd
+    header['CD1_1'] = cd[0][0]
+    header['CD1_2'] = cd[0][1]
+
+    header['CD2_1'] = cd[1][0]
+    header['CD2_2'] = cd[1][1]
+    
+    step = 32
+    xmin = ymin = step
+    
+    sh = im[0].data.shape
+    
+    a_names = []
+    b_names = []
+    
+    a_rand = []
+    b_rand = []
+    
+    sip_step = []
+    
+    for i in range(degree+1):
+        for j in range(degree+1):
+            ext = '{0}_{1}'.format(i, j)
+            if (i+j) > degree:
+                continue
+
+            if ext in ['0_0', '0_1', '1_0']:
+                continue
+
+            a_names.append('A_'+ext)
+            b_names.append('B_'+ext)
+            sip_step.append(1.e-3**(i+j))
+            
+    p0 = np.zeros(4+len(a_names)+len(b_names))
+    p0[:4] += cd.flatten()
+    
+    args = (u.flatten(), v.flatten(), x.flatten(), y.flatten(), crval, crpix, 
+            a_names, b_names, cd, 0)
+
+    # Fit the SIP coeffs
+    fit = least_squares(jwst_utils._objective_sip, p0, args=args, **lsq_args)
+
+    # Get the results
+    args = (u.flatten(), v.flatten(), x.flatten(), y.flatten(), crval, crpix, 
+            a_names, b_names, cd, 1)
+
+    cd_fit, a_coeff, b_coeff, ra_nmad, dec_nmad = jwst_utils._objective_sip(fit.x, *args)
+    #
+    for i in range(2):
+        for j in range(2):
+            header['CD{0}_{1}'.format(i+1, j+1)] = cd_fit[i, j]
+
+    header['CTYPE1'] = 'RA---TAN-SIP'
+    header['CTYPE2'] = 'DEC--TAN-SIP'
+    
+    header['NAXIS'] = 2
+    #sh = datamodel.data.shape
+    header['NAXIS1'] = sh[1]
+    header['NAXIS2'] = sh[0]
+    
+    header['A_ORDER'] = degree
+    for k in a_coeff:
+        header[k] = a_coeff[k]
+
+    header['B_ORDER'] = degree
+    for k in b_coeff:
+        header[k] = b_coeff[k]
+    
+    header['PIXSCALE'] = utils.get_wcs_pscale(header), 'Derived pixel scale'
+    
+    header['SIPSTATU'] = fit.status, 'least_squares result status'
+    header['SIPCOST'] = fit.cost, 'least_squares result cost'
+    header['SIPNFEV'] = fit.nfev, 'least_squares result nfev'
+    header['SIPNJEV'] = fit.njev, 'least_squares result njev'
+    header['SIPOPTIM'] = fit.optimality, 'least_squares result optimality'
+    header['SIPSUCSS'] = fit.success, 'least_squares result success'
+    header['SIPRAMAD'] = ra_nmad/header['PIXSCALE'], 'RA NMAD, pix'
+    header['SIPDEMAD'] = dec_nmad/header['PIXSCALE'], 'Dec NMAD, pix'
+    header['NMATCH'] = len(u)*1.
+    
+    wcs_new = pywcs.WCS(header)
+    rd_new = wcs_new.all_pix2world(u, v, 1)
+    c = utils.GTable()
+    c['ra'], c['dec'] = rd_new
+    id, dd, dx_new, dy_new = rd.match_to_catalog_sky(c, get_2d_offset=True)
+    
+    crval[0] += np.median(dx_new.value)/3600/cosd
+    crval[1] += np.median(dy_new.value)/3600
+    
+    rd_old = wcs.all_pix2world(u, v, 1)
+    c = utils.GTable()
+    c['ra'], c['dec'] = rd_old
+    id, dd, dx_old, dy_old = rd.match_to_catalog_sky(c, get_2d_offset=True)
+
+    header['X_OLD'] = utils.nmad(dy_old.value)
+    header['Y_OLD'] = utils.nmad(dy_old.value)
+    header['X_NEW'] = utils.nmad(dy_new.value)
+    header['Y_NEW'] = utils.nmad(dy_new.value)
+    
+    return header
+    
+    
+def distortion_m4():
+    """
+    """
+    rd = 245.8999645, -26.5252304
+    kws['column_filters']['ob_id'] = [657973]
+    
+    
+    coord = "AND ra > {0} AND ra < {1} AND dec > {2} AND dec < {3}".format(rd[0]-1.0, rd[0]+1.0, rd[1]-1.0, rd[1]+1.0) # UDS
+
+    query = f"""SELECT * FROM dbo.raw
+    WHERE (instrument='HAWKI') AND (filter_path='KS,OPEN')
+    AND tpl_nexp > {min_nexp} AND ob_id = 657973
+    {coord}
+    """
+    #query = "SELECT * FROM ivoa.ObsCore WHERE obs_collection='MUSE-DEEP' OR obs_collection='MUSE'"
+
+    MAXREC=200000
+    qstr = query.replace("'","%27").replace(' ','+').replace('\n','+').replace('=','%3D')
+    qstr = qstr.replace('>','%3E').replace('<','%3C')
+    TAP_URL = "http://archive.eso.org/tap_obs/sync?REQUEST=doQuery&FORMAT=fits&LANG=ADQL&MAXREC={0}&QUERY={1}"
+    SEND = TAP_URL.format(MAXREC, qstr)
+    print(SEND)
+
+    im = pyfits.open(SEND)
+    hi = utils.GTable()
+    for c in im[1].data.columns:
+        if len(im[1].data[c.name]) > 0:
+            hi[c.name] = im[1].data[c.name]
+    #
+    #so = np.argsort(hi['ob_id']*100+hi['tpl_expno'])
+    so = np.argsort(hi['exp_start'])
+    hi = hi[so]
+    
+    
+def query_eso_archive(filters=['Ks'], rd=(325.6038899,-44.3295833), min_nexp=5, eso=None):
+    """
+    Query the ESO archive
+    """
+    from grizli import utils
+    
+    if eso is None:
+        eso = get_eso()
+        
+    kwargs = {}
+    kwargs['column_filters'] = {}
+    kwargs['column_filters']['tpl_nexp'] = [f'> {min_nexp}']
+    kwargs['column_filters']['tpl_expno'] = [1]
+    kwargs['column_filters']['ins_filt1_name'] = filters
+    kwargs['column_filters']['dp_cat'] = ['SCIENCE']
+    #kwargs['column_filters']['dp_tech'] = ['IMAGE']
+    kwargs['column_filters']['pi_coi_name'] = 'PI_only'
+    
+    #kwargs['column_filters']['RA'] = [f'> {rd[0]-0.5}', f'< {rd[0]}+=0.5']
+    
+    kwargs['columns'] = ['tpl_nexp', 'tpl_expno', 'det_ndit', 'det_dit', 'det_ncorrs_name', 'obs_tmplno', 'det_ncorrs_name', 'prog_type', 'pi_coi']
+    
+    #res = eso.query_instrument('hawki', pi_coi_name='PI_only', **kwargs)
+    #res['PI'] = [p.split('/')[0].strip() for p in res['PI/CoI']]
+    
+    kws = {}
+    for k in kwargs:
+        kws[k] = kwargs[k].copy()
+    
+    kws['column_filters'].pop('tpl_nexp')
+    kws['column_filters'].pop('tpl_expno')
+    
+    _res = eso.query_instrument('hawki', pi_coi_name='PI_only',
+                                coord1=rd[0],
+                                coord2=rd[1], 
+                                box='00 30 00', 
+                                **kws)
+    
+    field = utils.radec_to_targname(*rd)
+                             
+    if len(_res) > 0:
+        print(f'{field}: {len(_res)} datasets')
+        _res['PI'] = [p.split('/')[0].strip() for p in _res['PI/CoI']]
+        _res.write(f'{field}_hawki.fits', overwrite=True)
+    
+    return field, _res
+    
+    # Run it
+    hawki.runit(root=field, eso=eso, ob_indices=[0], use_hst_radec=False, 
+                extensions=[1], redrizzle_args={'use_hst_ref':False,'pad':60}, 
+                sync=False, radec=None)
+                
+    #return eso, kwargs, res
+    
+def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True, radec=None, **kwargs):
     
     from golfir.vlt import hawki
     
@@ -55,7 +377,7 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         request_id = None
         fetch=True
     
-    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, radec=radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id)
+    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, radec=radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id, **kwargs)
         
     if sync:
         hawki.sync_results(include_exposures=False)
@@ -82,7 +404,7 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
         eso.login() #reenter_password=True)
     
     if not os.path.exists(f'{root}_hawki.fits .'):
-        os.system(f'aws s3 cp s3://grizli-v1/HAWKI/{root}_hawki.fits .')
+        os.system(f'aws s3 cp s3://grizli-hawki/HAWKI/{root}_hawki.fits .')
     
     tab = utils.read_catalog(root+'_hawki.fits')
     
@@ -127,12 +449,12 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     
     os.chdir('../')
     
-    os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
+    os.system(f'aws s3 cp s3://grizli-hawki/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
         
     if use_hst_radec:
         radec = hawki.make_hst_radec(root, maglim=[16,22])
         
-    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02, ob_minexp=ob_minexp)
+    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02, ob_minexp=ob_minexp, **kwargs)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
@@ -157,7 +479,7 @@ def make_hst_radec(root, maglim=[16,22]):
     phot_file = f'{root}_phot.fits'
     
     if not os.path.exists(phot_file):
-        os.system(f'aws s3 cp s3://grizli-v1/Pipeline/{root}/Prep/{root}_phot.fits .')  
+        os.system(f'aws s3 cp s3://grizli-hawki/Pipeline/{root}/Prep/{root}_phot.fits .')  
     
     phot = utils.read_catalog(phot_file)
     sel = (phot['mag_auto'] > maglim[0]) & (phot['mag_auto'] < maglim[1])
@@ -172,7 +494,7 @@ def make_hst_radec(root, maglim=[16,22]):
     return radec_file
     
     
-def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02):
+def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02, **kwargs):
     
     from golfir.vlt import hawki
     
@@ -180,7 +502,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18
         path = os.path.join(os.path.dirname(hawki.__file__), '../data')
         os.system(f'cp {path}/libra* .')
     
-    os.system('aws s3 sync s3://grizli-v1/HAWKI/Calibs/ RAW/')
+    os.system('aws s3 sync s3://grizli-stsci/HAWKI/Calibs/ RAW/')
     
     if not os.path.exists('files.list'):        
         os.system('dfits RAW/HAWKI*fits | fitsort OBS.ID DATE-OBS TPL.NEXP TPL.EXPNO | sed "s/FILE/# FILE/" > files.list')
@@ -260,7 +582,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18
             #seg_file = 'None'
             
         try:
-            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=max_shift, max_rot=max_rot, max_scale=max_scale)
+            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=max_shift, max_rot=max_rot, max_scale=max_scale, **kwargs)
 
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             if os.path.exists(LOGFILE):
@@ -275,7 +597,7 @@ def sync_results(include_exposures=False):
     root = os.getcwd().split('/')[-1]
 
     # Remove old Failed files
-    os.system(f'aws s3 rm s3://grizli-v1/HAWKI/{root}/ --recursive --exclude "*" --include "*failed"')
+    os.system(f'aws s3 rm s3://grizli-hawki/HAWKI/{root}/ --recursive --exclude "*" --include "*failed"')
 
     files = glob.glob(f'{root}-ks_drz*')    
     files += glob.glob('*flat.masked.fits')
@@ -289,14 +611,14 @@ def sync_results(include_exposures=False):
         
     fp = open(f'{root}_hawki.html','w')
     fp.write(f'<h4>{root} - {time.ctime()}</h4>\n')
-    fp.write(f'HST: <a href="https://s3.amazonaws.com/grizli-v1/Pipeline/{root}/Prep/{root}.summary.html">{root}</a><br>\n')
+    fp.write(f'HST: <a href="https://s3.amazonaws.com/grizli-hawki/Pipeline/{root}/Prep/{root}.summary.html">{root}</a><br>\n')
 
-    fp.write(f'<img src="https://s3.amazonaws.com/grizli-v1/HAWKI/{root}_hawki.png" height=300px><br>\n')
-    fp.write(f'<a href="https://s3.amazonaws.com/grizli-v1/HAWKI/{root}_hawki.fits">{root}_hawki.fits</a><br><p>\n')
+    fp.write(f'<img src="https://s3.amazonaws.com/grizli-hawki/HAWKI/{root}_hawki.png" height=300px><br>\n')
+    fp.write(f'<a href="https://s3.amazonaws.com/grizli-hawki/HAWKI/{root}_hawki.fits">{root}_hawki.fits</a><br><p>\n')
     
     fp.write('<pre>\n')
     
-    cmd = f'aws s3 sync ./ s3://grizli-v1/HAWKI/{root}/ --acl public-read --exclude "*" --include "*html"'
+    cmd = f'aws s3 sync ./ s3://grizli-hawki/HAWKI/{root}/ --acl public-read --exclude "*" --include "*html"'
     
     os.system(f'dfits Processed/*fits | fitsort  CRVAL1 CRVAL2 CRPIX1 CRPIX2 CD1_1 CD1_2 CD2_1 CD2_2 BKGORDER BKG001 BKG002 BKG003 BKG003 BKG004 BKG005 BKG006 BKG007 BKG008 BKG009 ORIGFILE DET.NDIT DET.DIT TPL.NEXP TPL.EXPNO OBS.ID > {root}.exposures.txt')
     
@@ -678,11 +1000,12 @@ def get_ob_root(h0):
     return ob_root
 
 
-def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02):
+def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02, n_brightest=100, align_mag_limits=[6,28,0.15], align_clip=-120, **kwargs):
     """
     Reduce a HAWKI chip
     """
     from scipy.spatial import cKDTree
+    from skimage.transform import SimilarityTransform, EuclideanTransform
     
     # Default calibrations
     flat = pyfits.open('RAW/M.HAWKI.2019-10-22T08_04_04.870.fits')
@@ -942,6 +1265,13 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         sci_i = sci_list[i].byteswap().newbyteorder()
         
         cat_i, seg = prep.make_SEP_catalog_from_arrays(sci_i, err, mask, wcs=wcs_list[i], threshold=7)
+        ok = np.isfinite(cat_i['MAG_AUTO'])
+        cat_i = cat_i[ok]
+
+        if n_brightest is not None:
+            so = np.argsort(cat_i)
+            cat_i = cat_i[so][:n_brightest]
+            
         msg = 'Exposure catalogs ({2}): {0}[{1}], N={3}'.format(sci_files[i], ext, i, len(cat_i))
         utils.log_comment(LOGFILE, msg, verbose=True)
         #print('Exposure catalogs', sci_files[i], ext, i)
@@ -1050,11 +1380,12 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
                     transform_wcs.append(wcs_list[i])
                 
                 continue
-                
-            from skimage.transform import SimilarityTransform
-    
+                    
             try:
-                tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=SimilarityTransform, use_ransac=ransac)
+                tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=EuclideanTransform, use_ransac=ransac)
+                if not hasattr(tfo, 'scale'):
+                    tfo.scale = 1.
+                    
             except:
                 msg = '   ! Align transform failed {0}[{1}],   N={2}'.format(sci_files[i], ext, len(cat_list[i]))
                 utils.log_comment(LOGFILE, msg, verbose=True)
@@ -1169,7 +1500,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         else:
             triangle_size = [5,200]
                         
-        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, clip=-120, simple=False, NITER=3, mag_limits=[6, 23], triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False)
+        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, simple=False, NITER=3, triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False, clip=align_clip, mag_limits=align_mag_limits)
         
         ######### Object masking
         if (align_iter == 0) & True:
