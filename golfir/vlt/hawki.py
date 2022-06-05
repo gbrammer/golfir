@@ -75,7 +75,7 @@ def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
             os.system(f'wget "{f}" -O {local_file}.Z -nv')
             os.system(f'gunzip {local_file}.Z')
      
-def avg():
+def sip_avg():
     import glob
     from tqdm import tqdm
     from astropy.io.fits import Header
@@ -88,7 +88,7 @@ def avg():
     files.sort()
     roots = [f.split('.cat.fits')[0] for f in files]
     
-    h = [fit_sip(root=root, degree=3) for root in tqdm(roots)]
+    h = [fit_sip(root=root, degree=3, radec='../m4-gaia.radec') for root in tqdm(roots)]
     
     avgh = Header()
     for k in h[0]:
@@ -117,10 +117,12 @@ def avg():
             print(k, avgh[k], lib[k])
     
     avgh['OEXTNAME'] = lib['OEXTNAME']
-    avgh['COMMENT'] = 'SIP fit to Abell 2744'
-    avgh.totextfile(f'../a2744_hawki_chip{chip}.crpix.header')
-    
-def fit_sip(root='ob1012480-20131025-005002-002-1', degree=3):
+    avgh['COMMENT'] = 'SIP fit to M4 OB 657973'
+    avgh.totextfile(f'../m4_hawki_chip{chip}.crpix.header', overwrite=True)
+    avgh.totextfile(f'../libralato_hawki_chip{chip}.crpix.header', overwrite=True)
+
+
+def fit_sip(root='ob1012480-20131025-005002-002-1', radec='../hst.radec', degree=3):
     """
     """     
     from grizli import jwst_utils, utils
@@ -129,7 +131,7 @@ def fit_sip(root='ob1012480-20131025-005002-002-1', degree=3):
     from astropy.io.fits import Header
     from scipy.optimize import least_squares
     
-    rd = utils.read_catalog('../hst.radec')
+    rd = utils.read_catalog(radec)
     im = pyfits.open(f'{root}.sci.fits')
     wcs = pywcs.WCS(im[0].header) 
     cat = utils.read_catalog(f'{root}.cat.fits')
@@ -243,7 +245,7 @@ def fit_sip(root='ob1012480-20131025-005002-002-1', degree=3):
     header['NMATCH'] = len(u)*1.
     
     wcs_new = pywcs.WCS(header)
-    rd_new = wcs_new.all_pix2world(u, v, 1)
+    rd_new = wcs_new.all_pix2world(u, v, 0)
     c = utils.GTable()
     c['ra'], c['dec'] = rd_new
     id, dd, dx_new, dy_new = rd.match_to_catalog_sky(c, get_2d_offset=True)
@@ -251,7 +253,7 @@ def fit_sip(root='ob1012480-20131025-005002-002-1', degree=3):
     crval[0] += np.median(dx_new.value)/3600/cosd
     crval[1] += np.median(dy_new.value)/3600
     
-    rd_old = wcs.all_pix2world(u, v, 1)
+    rd_old = wcs.all_pix2world(u, v, 0)
     c = utils.GTable()
     c['ra'], c['dec'] = rd_old
     id, dd, dx_old, dy_old = rd.match_to_catalog_sky(c, get_2d_offset=True)
@@ -1387,7 +1389,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
                 continue
                     
             try:
-                tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=EuclideanTransform, use_ransac=ransac)
+                tfo, dx, rms = match.get_transform(V1, V2, pair_ix, transform=SimilarityTransform, use_ransac=ransac)
                 if not hasattr(tfo, 'scale'):
                     tfo.scale = 1.
                     
