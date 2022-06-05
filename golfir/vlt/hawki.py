@@ -1265,11 +1265,11 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         sci_i = sci_list[i].byteswap().newbyteorder()
         
         cat_i, seg = prep.make_SEP_catalog_from_arrays(sci_i, err, mask, wcs=wcs_list[i], threshold=7)
-        ok = np.isfinite(cat_i['MAG_AUTO'])
+        ok = cat_i['flux'] > 0
         cat_i = cat_i[ok]
 
         if n_brightest is not None:
-            so = np.argsort(cat_i)
+            so = np.argsort(cat_i['flux'])[::-1]
             cat_i = cat_i[so][:n_brightest]
             
         msg = 'Exposure catalogs ({2}): {0}[{1}], N={3}'.format(sci_files[i], ext, i, len(cat_i))
