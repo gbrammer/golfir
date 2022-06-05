@@ -356,12 +356,13 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
     
     from golfir.vlt import hawki
     
-    if eso is None:
-        eso = astroquery.eso.Eso()
-        eso.login()
+    if fetch:
+        if eso is None:
+            eso = astroquery.eso.Eso()
+            eso.login()
     
-    if not eso._authenticated:
-        eso.login()
+        if not eso._authenticated:
+            eso.login()
         
     if root.startswith('hff-'):
         # Run in two steps for global masking
@@ -398,10 +399,11 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
 def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={'use_hst_ref':True, 'pad':60}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
     from golfir.vlt import hawki
 
-    if eso is None:
-        eso = astroquery.eso.Eso()
-        # Configure 'username' in ~/.astropy/config
-        eso.login() #reenter_password=True)
+    if fetch:
+        if eso is None:
+            eso = astroquery.eso.Eso()
+            # Configure 'username' in ~/.astropy/config
+            eso.login() #reenter_password=True)
     
     if not os.path.exists(f'{root}_hawki.fits .'):
         os.system(f'aws s3 cp s3://grizli-hawki/HAWKI/{root}_hawki.fits .')
@@ -1000,7 +1002,7 @@ def get_ob_root(h0):
     return ob_root
 
 
-def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02, n_brightest=100, align_mag_limits=[6,28,0.15], align_clip=-120, **kwargs):
+def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, assume_close=10, radec=None, stop=None, seg_file='None', max_shift=100, max_rot=3, max_scale=0.02, n_brightest=100, align_mag_limits=[6,28,0.15], align_clip=500, **kwargs):
     """
     Reduce a HAWKI chip
     """
@@ -1270,8 +1272,11 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
 
         if n_brightest is not None:
             so = np.argsort(cat_i['flux'])[::-1]
-            cat_i = cat_i[so][:n_brightest]
-            
+            if len(so) > n_brightest+10:
+                cat_i = cat_i[so][10:n_brightest+10]
+            else:
+                cat_i = cat_i[so][:n_brightest]
+                
         msg = 'Exposure catalogs ({2}): {0}[{1}], N={3}'.format(sci_files[i], ext, i, len(cat_i))
         utils.log_comment(LOGFILE, msg, verbose=True)
         #print('Exposure catalogs', sci_files[i], ext, i)
