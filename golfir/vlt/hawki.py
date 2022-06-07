@@ -17,7 +17,7 @@ except:
 
 try:
     from grizli import prep, utils
-    import grizli.ds9
+    #import grizli.ds9
 except:
     print("(golfir.hawki) Warning: failed to import grizli")
     
@@ -25,13 +25,48 @@ except:
 
 import traceback
 
-import astroquery.eso
-eso = astroquery.eso.Eso()
-if False:
-    eso.login() #reenter_password=True)
+# import astroquery.eso
+# eso = astroquery.eso.Eso()
+# if False:
+#     eso.login() #reenter_password=True)
 
-def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
+def full_query():
     """
+    """
+    MAXREC=5000
+    query = """
+    SELECT ob_id, target, avg(ra) as ra, avg(dec) as dec, 
+           min(ra) minra, max(ra) as maxra,
+           min(dec) as mindec, max(dec) as maxdec,
+           count(exposure) as n, sum(exposure)/3600 as hours,
+           prog_id,pi_coi 
+    FROM dbo.raw
+    WHERE (instrument='HAWKI') AND (filter_path='KS,OPEN')
+    AND ra > 0 AND dec > -90
+    AND tpl_nexp > 10 GROUP BY ob_id, target, prog_id, pi_coi
+        """
+    #
+    qstr = query.replace("'","%27").replace(' ','+').replace('\n','+').replace('=','%3D')
+    qstr = qstr.replace('>','%3E').replace('<','%3C')
+    TAP_URL = "http://archive.eso.org/tap_obs/sync?REQUEST=doQuery&FORMAT=fits&LANG=ADQL&MAXREC={0}&QUERY={1}"
+    SEND = TAP_URL.format(MAXREC, qstr)
+    print(SEND)
+
+    im = pyfits.open(SEND)
+    hi = utils.GTable()
+    for c in im[1].data.columns:
+        if len(im[1].data[c.name]) > 0:
+            hi[c.name] = im[1].data[c.name]
+    
+    hi['pi'] = [p.strip() for p in hi['pi_coi']]
+    hi = hi[hi['pi'] != '']
+    
+    hi['pi'] = [p.strip().split()[0].strip('/').split('/')[0] for p in hi['pi_coi']]
+
+
+def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10, filter=" AND (filter_path='KS,OPEN')", extra=''):
+    """
+    Get from http://archive.eso.org/tap_obs
     """
     import astropy.io.fits as pyfits
     from grizli import utils
@@ -41,9 +76,10 @@ def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
     coord = "AND ra > {0} AND ra < {1} AND dec > {2} AND dec < {3}".format(rd[0]-1.0, rd[0]+1.0, rd[1]-1.0, rd[1]+1.0) # UDS
 
     query = f"""SELECT * FROM dbo.raw
-    WHERE (instrument='HAWKI') AND (filter_path='KS,OPEN')
+    WHERE (instrument='HAWKI') {filter}
     AND tpl_nexp > {min_nexp}
     {coord}
+    {extra}
     """
     #query = "SELECT * FROM ivoa.ObsCore WHERE obs_collection='MUSE-DEEP' OR obs_collection='MUSE'"
 
@@ -63,7 +99,22 @@ def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
     #so = np.argsort(hi['ob_id']*100+hi['tpl_expno'])
     so = np.argsort(hi['exp_start'])
     hi = hi[so]
+        
+    field = utils.radec_to_targname(*rd)
+                             
+    if len(hi) > 0:
+        print(f'{field}: {len(hi)} datasets')
+        hi['pi_coi'] = [p.split('/')[0].strip() for p in hi['pi_coi']]
+        hi.write(f'{field}_hawki.fits', overwrite=True)
+    
     return hi
+    
+    path = f'{field}/RAW'
+    for d in [field, f'{field}/RAW']:
+        if not os.path.exists(d):
+            os.mkdir(d)
+    
+    os.chdir(d)
     
     #hi['obs_collection'] = [o.strip() for o in hi['obs_collection']]
     for i, f in enumerate(hi['access_url']):
@@ -74,7 +125,8 @@ def hawki_tap_query(rd=(325.6038899,-44.3295833), min_nexp=10):
             print(f'\n\n{i+1} / {len(hi)} : Fetch {local_file}\n')
             os.system(f'wget "{f}" -O {local_file}.Z -nv')
             os.system(f'gunzip {local_file}.Z')
-     
+
+
 def sip_avg():
     import glob
     from tqdm import tqdm
@@ -269,9 +321,36 @@ def fit_sip(root='ob1012480-20131025-005002-002-1', radec='../hst.radec', degree
 def distortion_m4():
     """
     """
-    rd = 245.8999645, -26.5252304
-    kws['column_filters']['ob_id'] = [657973]
+    from grizli import utils
+    filters = ['Ks']
+    min_nexp = 10
     
+    rd = 245.8999645, -26.5252304
+    
+    kwargs = {}
+    kwargs['column_filters'] = {}
+    kwargs['column_filters']['tpl_nexp'] = [f'> {min_nexp}']
+    kwargs['column_filters']['tpl_expno'] = [1]
+    kwargs['column_filters']['ins_filt1_name'] = filters
+    kwargs['column_filters']['dp_cat'] = ['SCIENCE']
+    #kwargs['column_filters']['dp_tech'] = ['IMAGE']
+    kwargs['column_filters']['pi_coi_name'] = 'PI_only'
+    
+    #kwargs['column_filters']['RA'] = [f'> {rd[0]-0.5}', f'< {rd[0]}+=0.5']
+    
+    kwargs['columns'] = ['tpl_nexp', 'tpl_expno', 'det_ndit', 'det_dit', 'det_ncorrs_name', 'obs_tmplno', 'det_ncorrs_name', 'prog_type', 'pi_coi']
+    
+    #res = eso.query_instrument('hawki', pi_coi_name='PI_only', **kwargs)
+    #res['PI'] = [p.split('/')[0].strip() for p in res['PI/CoI']]
+    
+    kws = {}
+    for k in kwargs:
+        kws[k] = kwargs[k].copy()
+    
+    kws['column_filters'].pop('tpl_nexp')
+    kws['column_filters'].pop('tpl_expno')
+    
+    kws['column_filters']['ob_id'] = [657973]
     
     coord = "AND ra > {0} AND ra < {1} AND dec > {2} AND dec < {3}".format(rd[0]-1.0, rd[0]+1.0, rd[1]-1.0, rd[1]+1.0) # UDS
 
@@ -294,7 +373,7 @@ def distortion_m4():
     for c in im[1].data.columns:
         if len(im[1].data[c.name]) > 0:
             hi[c.name] = im[1].data[c.name]
-    #
+    
     #so = np.argsort(hi['ob_id']*100+hi['tpl_expno'])
     so = np.argsort(hi['exp_start'])
     hi = hi[so]
@@ -305,6 +384,7 @@ def query_eso_archive(filters=['Ks'], rd=(325.6038899,-44.3295833), min_nexp=5, 
     Query the ESO archive
     """
     from grizli import utils
+    from golfir.vlt.archive import get_eso
     
     if eso is None:
         eso = get_eso()
@@ -348,7 +428,9 @@ def query_eso_archive(filters=['Ks'], rd=(325.6038899,-44.3295833), min_nexp=5, 
     return field, _res
     
     # Run it
-    hawki.runit(root=field, eso=eso, ob_indices=[0], use_hst_radec=False, 
+    #from golfir.vlt import hawki
+    
+    runit(root=field, eso=eso, ob_indices=[0], use_hst_radec=False, 
                 extensions=[1], redrizzle_args={'use_hst_ref':False,'pad':60}, 
                 sync=False, radec=None)
                 
@@ -356,15 +438,15 @@ def query_eso_archive(filters=['Ks'], rd=(325.6038899,-44.3295833), min_nexp=5, 
     
 def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, extensions=[1,2,3,4], redrizzle_args={'use_hst_ref':True,'pad':60}, fetch=True, request_id=None, clean=False, sync=True, radec=None, **kwargs):
     
-    from golfir.vlt import hawki
+    #from golfir.vlt import hawki
     
-    if fetch:
-        if eso is None:
-            eso = astroquery.eso.Eso()
-            eso.login()
-    
-        if not eso._authenticated:
-            eso.login()
+    # if fetch:
+    #     if eso is None:
+    #         eso = astroquery.eso.Eso()
+    #         eso.login()
+    # 
+    #     if not eso._authenticated:
+    #         eso.login()
         
     if root.startswith('hff-'):
         # Run in two steps for global masking
@@ -380,10 +462,10 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         request_id = None
         fetch=True
     
-    hawki.pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, radec=radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id, **kwargs)
+    pipeline(root=root, eso=eso, ob_indices=ob_indices, use_hst_radec=use_hst_radec, radec=radec, extensions=extensions, redrizzle_args=redrizzle_args, fetch=fetch, request_id=request_id, **kwargs)
         
     if sync:
-        hawki.sync_results(include_exposures=False)
+        sync_results(include_exposures=False)
         status = os.path.exists(f'{root}-ks_drz_sci.fits.gz')
     else:
         status = os.path.exists(f'{root}-ks_drz_sci.fits')
@@ -398,21 +480,25 @@ def runit(root='j003548m4312', eso=None, ob_indices=None, use_hst_radec=False, e
         print(f'ks mosaic not found.  Problem with {root}?')
         return False
         
-def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={'use_hst_ref':True, 'pad':60}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), **kwargs):
-    from golfir.vlt import hawki
+def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False, radec=None, assume_close=20, extensions=[1,2,3,4], fetch=True, request_id=None, redrizzle_args={'use_hst_ref':True, 'pad':60}, ob_minexp=8, retrieve_kwargs=dict(continuation=False, unzip=False), retry_failed=False, **kwargs):
+    #from golfir.vlt import hawki
 
-    if fetch:
-        if eso is None:
-            eso = astroquery.eso.Eso()
-            # Configure 'username' in ~/.astropy/config
-            eso.login() #reenter_password=True)
+    # if fetch:
+    #     if eso is None:
+    #         eso = astroquery.eso.Eso()
+    #         # Configure 'username' in ~/.astropy/config
+    #         eso.login() #reenter_password=True)
     
     if not os.path.exists(f'{root}_hawki.fits .'):
         os.system(f'aws s3 cp s3://grizli-hawki/HAWKI/{root}_hawki.fits .')
     
     tab = utils.read_catalog(root+'_hawki.fits')
     
-    ob_start = np.where(tab['TPL EXPNO'] == 1)[0]
+    if 'TPL EXPNO' in tab.colnames:
+        ob_start = np.where(tab['TPL EXPNO'] == 1)[0]
+    else:
+        ob_start = np.where(tab['tpl_expno'] == 1)[0]
+        
     ob_end = np.roll(ob_start, -1)
     ob_end[-1] = len(tab)
     ob_nexp = ob_end - ob_start
@@ -427,7 +513,10 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
             continue
             
         sl = slice(ob_start[ind], ob_end[ind])
-        datasets.extend(list(tab['DP.ID'][sl]))
+        if 'access_url' in tab.colnames:
+            datasets.extend(list(tab['access_url'][sl]))
+        else:
+            datasets.extend(list(tab['DP.ID'][sl]))
             
     dirs = [root, os.path.join(root, 'RAW'), os.path.join(root, 'Processed')]
     for dir in dirs:
@@ -438,42 +527,55 @@ def pipeline(root='j234456m6406', eso=None, ob_indices=None, use_hst_radec=False
     print(f'{root}: fetch {len(datasets)} files (ob_indices={ob_indices})')       
     
     #request_id = None # Restart an earlier request
-    
+        
     os.chdir(dirs[1])
 
-    if fetch:
-        data_files = eso.retrieve_data(datasets, destination=os.getcwd(), request_id=request_id, **retrieve_kwargs)
+    if fetch & (len(datasets) > 0):
+        ND = len(datasets)
+        
+        if datasets[0].startswith('http'):
+            for i, f in enumerate(datasets):
+                local_file = os.path.basename(f)+'.fits'
+                if os.path.exists(local_file):
+                    print(i, local_file, 'Exists')
+                else:
+                    print(f'\n\n{i+1} / {ND} : Fetch {local_file}\n')
+                    os.system(f'wget "{f}" -O {local_file}.Z -nv')
+                    os.system(f'gunzip {local_file}.Z')
+        else:
+            data_files = eso.retrieve_data(datasets, destination=os.getcwd(), request_id=request_id, **retrieve_kwargs)
+        
+            files = glob.glob('*.Z')
+            files.sort()
     
-        files = glob.glob('*.Z')
-        files.sort()
-    
-        for file in files: 
-            print(file)
-            os.system('gunzip '+file)
+            for file in files: 
+                print(file)
+                os.system('gunzip '+file)
     
     os.chdir('../')
     
-    os.system(f'aws s3 cp s3://grizli-hawki/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
+    # os.system(f'aws s3 cp s3://grizli-hawki/Pipeline/{root}/Prep/{root}-ir_drz_sci.fits.gz .')  
         
-    if use_hst_radec:
-        radec = hawki.make_hst_radec(root, maglim=[16,22])
+    # if use_hst_radec:
+    #     radec = hawki.make_hst_radec(root, maglim=[16,22])
         
-    hawki.parse_and_run(extensions=extensions, radec=radec, assume_close=20, max_shift=500, max_rot=3, max_scale=0.02, ob_minexp=ob_minexp, **kwargs)
+    parse_and_run(extensions=extensions, radec=radec, assume_close=assume_close, max_shift=500, max_rot=3, max_scale=0.02, ob_minexp=ob_minexp, **kwargs)
     
     # Try to rerun the failed observations with the HST reference
     failed = glob.glob('*failed')
-    if len(failed) > 0:
+    if (len(failed) > 0) & retry_failed:
         for fail in failed:
             froot = fail.split('.failed')[0]
             print(f'Clean {froot} failed')
             os.system(f'rm *{froot}* Processed/{froot}*')
         
-        radec = hawki.make_hst_radec(root, maglim=[16,22])
-        hawki.parse_and_run(extensions=[1,2,3,4], radec=radec)
+        radec = make_hst_radec(root, maglim=[16,22])
+        parse_and_run(extensions=[1,2,3,4], radec=radec)
     
     # from importlib import reload
     # reload(hawki)     
-    hawki.redrizzle_mosaics(**redrizzle_args)
+    if redrizzle_args is not None:
+        redrizzle_mosaics(**redrizzle_args)
     
         
 def make_hst_radec(root, maglim=[16,22]):
@@ -500,10 +602,10 @@ def make_hst_radec(root, maglim=[16,22]):
     
 def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18, seg_file='None', assume_close=10, max_shift=100, max_rot=3, max_scale=0.02, **kwargs):
     
-    from golfir.vlt import hawki
+    #from golfir.vlt import hawki
     
     if not os.path.exists('libralato_hawki_chip1.crpix.header'):
-        path = os.path.join(os.path.dirname(hawki.__file__), '../data')
+        path = os.path.join(os.path.dirname(__file__), '../data')
         os.system(f'cp {path}/libra* .')
     
     os.system('aws s3 sync s3://grizli-stsci/HAWKI/Calibs/ RAW/')
@@ -547,7 +649,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18
     group_dict = {}
     for i, sci_files in enumerate(file_groups):
         for ext in extensions:
-            ob_root = hawki.get_ob_root(sci_files[0])            
+            ob_root = get_ob_root(sci_files[0])            
             key = '{0}-{1}'.format(ob_root, ext)
             group_dict[key] = sci_files
     
@@ -586,7 +688,7 @@ def parse_and_run(extensions=[2], SKIP=True, stop=None, radec=None, ob_minexp=18
             #seg_file = 'None'
             
         try:
-            hawki.process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=max_shift, max_rot=max_rot, max_scale=max_scale, **kwargs)
+            process_hawki(sci_files, bkg_order=3, ext=ext, ds9=None, bkg_percentile=47.5, assume_close=assume_close, radec=radec, stop=stop, seg_file=seg_file, max_shift=max_shift, max_rot=max_rot, max_scale=max_scale, **kwargs)
 
             LOGFILE = '{0}-{1}.failed'.format(ob_root, ext)
             if os.path.exists(LOGFILE):
@@ -1268,7 +1370,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         err[mask] = 1e10
         sci_i = sci_list[i].byteswap().newbyteorder()
         
-        cat_i, seg = prep.make_SEP_catalog_from_arrays(sci_i, err, mask, wcs=wcs_list[i], threshold=7)
+        cat_i, seg = prep.make_SEP_catalog_from_arrays(sci_i, err, mask, wcs=wcs_list[i], threshold=7, verbose=False)
         ok = cat_i['flux'] > 0
         cat_i = cat_i[ok]
 
@@ -1480,26 +1582,42 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         cat = prep.make_SEP_catalog('{0}-{1}-ks'.format(ob_root, ext), threshold=3, column_case=str.upper)
         sn = cat['FLUX_APER_2'] / cat['FLUXERR_APER_2']
         clip = np.isfinite(sn) #& (cat['THRESH'] < 1e20)
+        clip &= sn > 10
+        clip &= cat['MASK_APER_2'] == 0
         cat = cat[clip]
         
-        clip &= sn > 10
-        N = 80
-        so = np.argsort(cat['MAG_AUTO'])[:N]
+        N = 150
+        if len(cat) > 10:
+            so = np.argsort(cat['MAG_AUTO'])[5:N+5]
+        else:
+            so = np.argsort(cat['MAG_AUTO'])[:]
+            
         cat = cat[so]
         
         if assume_close > 0:
             idx, dr = radec_tab.match_to_catalog_sky(cat)
-            clip = dr.value < assume_close
+            
+            if align_iter == 0:
+                close_sep = assume_close
+            else:
+                close_sep = 0.2
+                
+            clip = dr.value < close_sep
             cat = cat[clip]
             
             # rev
             idx, dr = cat.match_to_catalog_sky(radec_tab)
-            rclip = dr.value < assume_close
+            rclip = dr.value < close_sep
+            if rclip.sum() > 150:
+                _skip = (rclip.sum() // 150+1)
+                rclip = np.where(rclip)[0][::_skip]
+                
             prep.table_to_radec(radec_tab[rclip], 'tmp.radec')
             radec_i = 'tmp.radec'
         else:
             radec_i = radec
             rclip = np.ones(len(radec_tab), dtype=bool)
+        
         cat.write('{0}-{1}-ks.cat.fits'.format(ob_root, ext), overwrite=True)
         
         if 'gaia' in radec:
@@ -1507,7 +1625,7 @@ def process_hawki(sci_files, bkg_order=3, ext=1, ds9=None, bkg_percentile=50, as
         else:
             triangle_size = [5,200]
                         
-        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, simple=False, NITER=3, triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False, clip=align_clip, mag_limits=align_mag_limits)
+        _res = prep.align_drizzled_image(root='{0}-{1}-ks'.format(ob_root, ext), triangle_size_limit=triangle_size, radec=radec_i, simple=False, NITER=3, triangle_ba_max=0.99, catalog_mask_pad=0.05, outlier_threshold=5, max_err_percentile=101, match_catalog_density=False, clip=align_clip, mag_limits=align_mag_limits, assume_close=(align_iter > 0))
         
         ######### Object masking
         if (align_iter == 0) & True:
