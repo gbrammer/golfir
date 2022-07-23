@@ -723,7 +723,7 @@ def shapely_ellipse_from_catalog(x, y, a, b, theta):
     return ellr
 
 
-def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w','f850lp'], optical_kernel_sigma=1.3, scale_keyword='PHOTFLAM', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, subtract_background=False, **kwargs):
+def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w','f850lp'], optical_kernel_sigma=1.3, scale_keyword='PHOTFLAM', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, subtract_background=False, use_hst_kernel=True, **kwargs):
     """
     Make combined detection image for a given field
     """
@@ -750,7 +750,7 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
     hst_kernel_file = os.path.join(os.path.dirname(__file__),
                                 'data/psf/psf_kernel_f814w_f160w_50mas.fits')
                                    
-    if os.path.exists(hst_kernel_file):
+    if os.path.exists(hst_kernel_file) & use_hst_kernel:
         msg = f'Use PSF-matching kernel {hst_kernel_file}'
         utils.log_comment(logfile, msg, verbose=True)
         
