@@ -723,7 +723,7 @@ def shapely_ellipse_from_catalog(x, y, a, b, theta):
     return ellr
 
 
-def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w','f850lp'], optical_kernel_sigma=1.3, scale_keyword='PHOTFLAM', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, **kwargs):
+def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f110w','f105w','f814w','f850lp'], optical_kernel_sigma=1.3, scale_keyword='PHOTFLAM', run_catalog=False, mask_optical_weight=0.33, mask_ir_weight=-0.1, logfile=None, sep_bkg=[1.5, 16, 5], weight_pad=8, subtract_background=False, **kwargs):
     """
     Make combined detection image for a given field
     """
@@ -798,10 +798,12 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
         sh = sci[0].data.shape
         resize = sh[0] != num.shape[0]
 
-        is_optical = '_drc' in file
+        is_optical = ('_drc' in file) 
         
         msg = f'{file} {scale:7.2f} optical={is_optical} resize={resize}'
         utils.log_comment(logfile, msg, verbose=True)
+        
+        bkg_img = 0.
         
         if sep_bkg is not None:
             mask = (sci[0].data*np.sqrt(wht[0].data) > sep_bkg[0]) 
@@ -815,8 +817,14 @@ def make_charge_detection(root, ext='det', filters=['f160w','f140w','f125w','f11
                              fw=fw, fh=fw, mask=mask)
             wht_i = 1/bkg.rms()**2
             wht_i *= wht[0].data > 0
+
+            if subtract_background:
+                bkg_img = bkg.back()
+                
         else:
             wht_i = wht[0].data
+        
+        sci[0].data -= bkg_img
             
         if weight_pad > 0:
             msg = f'    weight_pad: {weight_pad}'
