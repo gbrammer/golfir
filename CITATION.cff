@@ -9,7 +9,7 @@ abstract: >-
   CHArGE / GOLF project (Brammer, Stefanon et al.).
 message: Please cite this software using these metadata.
 version: 1.0
-doi: XXXX
+doi: 10.5281/zenodo.7149516
 date-released: 2022-10-05
 url: https://github.com/gbrammer/golfir
 publisher: GitHub
