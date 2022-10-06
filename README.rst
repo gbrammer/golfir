@@ -1,5 +1,8 @@
 .. image:: docs/_static/golfir_logo.png
 
+.. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.7149516.svg
+   :target: https://doi.org/10.5281/zenodo.7149516
+   
 ``golfir``: Great Observatories Legacy Fields IR Analysis Tools
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 This repository provides tools for modeling Spitzer IRAC and MIPS images based on high resolution templates from existing Hubble imaging in the context of the CHArGE / GOLF project (Brammer, Stefanon et al.).
