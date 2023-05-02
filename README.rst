@@ -1,5 +1,11 @@
 .. image:: docs/_static/golfir_logo.png
 
+.. image:: https://github.com/gbrammer/golfir/actions/workflows/python-package.yml/badge.svg
+    :target: https://github.com/gbrammer/golfir/actions
+
+.. image:: https://badge.fury.io/py/golfir.svg
+    :target: https://badge.fury.io/py/golfir
+
 .. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.7149516.svg
    :target: https://doi.org/10.5281/zenodo.7149516
    
