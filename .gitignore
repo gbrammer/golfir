@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+golfir/version.py
+
 # C extensions
 *.so
 
