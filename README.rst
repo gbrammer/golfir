@@ -20,6 +20,12 @@ Requirements:
        
 Installation:
 ~~~~~~~~~~~~~
+
+    .. code:: bash
+    
+        $ pip install golfir
+
+
     .. code:: bash
     
         $ git clone git@github.com:gbrammer/golfir.git
